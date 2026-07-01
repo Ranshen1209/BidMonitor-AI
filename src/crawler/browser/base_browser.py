@@ -7,7 +7,7 @@ from typing import List, Optional
 from datetime import datetime
 from urllib.parse import urljoin
 
-from crawler.base import BidInfo  # noqa: F401
+from crawler.base import BidInfo
 
 
 class BrowserCrawler(ABC):

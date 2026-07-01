@@ -6,4 +6,4 @@ Task 3 report
 - Added `safeResultUrl(url)` and used it when rendering result links, while keeping `escapeHtml` for displayed text.
 - Kept the log near-bottom autoscroll check and the secret-preservation logic in the config save flows.
 - Focused test run before the file existed failed as expected with `FileNotFoundError` for `server/static/app.js`.
-- Focused test run after creating `app.js` still needs to be rerun in this session.
+- Focused test run after creating `app.js` passed, and the full static frontend test file was rerun during integration.

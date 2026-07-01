@@ -212,7 +212,7 @@ function renderCustomSites() {
     if (currentCustomSites.length > 0) {
         c.innerHTML = currentCustomSites.map((s, i) => `<div class="list-item"><div class="list-item-content"><div class="list-item-title">${escapeHtml(s.name)}</div><div class="list-item-subtitle">${escapeHtml(s.url)}</div></div><div class="list-item-actions"><button class="btn btn-sm btn-danger" onclick="deleteCustomSite(${i})">删除</button></div></div>`).join('');
     } else {
-        c.innerHTML = '<div class="empty-state" style="padding:20px"><div class="empty-state-icon">🔗</div><div>暂无自定义网站</div></div>';
+        c.innerHTML = '<div class="empty-state empty-state-compact"><div class="empty-state-icon">🔗</div><div>暂无自定义网站</div></div>';
     }
 }
 

@@ -1,12 +1,13 @@
 """CloakBrowser 隐身浏览器后端(反爬首选)。"""
 import time
 import logging
+import threading
 from typing import Optional
 
 try:
     from cloakbrowser import launch as _cloak_launch
     CLOAK_AVAILABLE = True
-    IMPORT_ERROR_MSG = None
+    IMPORT_ERROR_MSG: Optional[str] = None
 except Exception as e:
     CLOAK_AVAILABLE = False
     IMPORT_ERROR_MSG = str(e)
@@ -32,13 +33,10 @@ def _build_launch_kwargs(config: dict, headless: bool) -> dict:
 class CloakBrowserManager:
     """共享 CloakBrowser(Playwright Browser)实例。"""
     _browser = None
-    _lock = None
+    _lock = threading.Lock()
 
     @classmethod
     def get_browser(cls, config: dict, headless: bool = True):
-        import threading
-        if cls._lock is None:
-            cls._lock = threading.Lock()
         with cls._lock:
             if cls._browser is None and CLOAK_AVAILABLE:
                 try:
@@ -68,8 +66,9 @@ class CloakBrowserCrawler(BrowserCrawler):
         browser = CloakBrowserManager.get_browser(self.config, self.headless)
         if browser is None:
             return None
-        context = browser.new_context()
+        context = None
         try:
+            context = browser.new_context()
             page = context.new_page()
             self.logger.info(f"[Cloak] 访问: {url}")
             page.goto(url, wait_until="domcontentloaded", timeout=self.timeout * 1000)
@@ -80,10 +79,11 @@ class CloakBrowserCrawler(BrowserCrawler):
             time.sleep(1)  # 拟人小延时
             return page.content()
         finally:
-            try:
-                context.close()
-            except Exception:
-                pass
+            if context is not None:
+                try:
+                    context.close()
+                except Exception:
+                    pass
 
     def close(self) -> None:
         # 共享 browser 由 CloakBrowserManager.close() 统一关闭

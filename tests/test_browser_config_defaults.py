@@ -29,6 +29,13 @@ class CloakLaunchKwargsTests(unittest.TestCase):
         self.assertEqual(kw["locale"], "zh-CN")
         self.assertEqual(kw["license_key"], "abc")
 
+    def test_empty_or_none_optional_keys_excluded(self):
+        cfg = {"browser": {"proxy": "", "license_key": None, "timezone": ""}}
+        kw = cb._build_launch_kwargs(cfg, headless=True)
+        self.assertNotIn("proxy", kw)
+        self.assertNotIn("license_key", kw)
+        self.assertNotIn("timezone", kw)
+
 
 if __name__ == "__main__":
     unittest.main()

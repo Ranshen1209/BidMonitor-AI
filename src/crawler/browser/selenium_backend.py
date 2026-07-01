@@ -2,6 +2,7 @@
 import time
 import random
 import logging
+import threading
 from typing import Optional
 
 try:
@@ -80,13 +81,10 @@ class SharedBrowserManager:
     """共享 Chrome 实例,所有站点复用。"""
     _driver = None
     _instance = None
-    _lock = None
+    _lock = threading.Lock()
 
     @classmethod
     def get_driver(cls, timeout: int = 30):
-        import threading
-        if cls._lock is None:
-            cls._lock = threading.Lock()
         with cls._lock:
             if cls._driver is None:
                 cls._driver = _create_driver(headless=True, timeout=timeout)
@@ -121,19 +119,24 @@ class SeleniumCrawler(BrowserCrawler):
                 self.driver = _create_driver(self.headless, self.timeout)
             if not self.driver:
                 return None
-        self.logger.info(f"[Selenium] 访问: {url}")
-        self.driver.get(url)
-        time.sleep(2)
-        WebDriverWait(self.driver, 10).until(
-            EC.presence_of_element_located((By.TAG_NAME, "body"))
-        )
-        return self.driver.page_source
+        try:
+            self.logger.info(f"[Selenium] 访问: {url}")
+            self.driver.get(url)
+            time.sleep(2)
+            WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.TAG_NAME, "body"))
+            )
+            return self.driver.page_source
+        except Exception as e:
+            self.logger.warning(f"[Selenium] 取页失败,重置 driver: {e}")
+            self.driver = None
+            return None
 
     def close(self) -> None:
-        # 共享浏览器由 SharedBrowserManager.close() 统一关闭
-        if self.driver and not SharedBrowserManager._instance:
+        # 仅关闭本爬虫私有的独立 driver;共享 driver 由 SharedBrowserManager.close() 统一关闭
+        if self.driver is not None and self.driver is not SharedBrowserManager._driver:
             try:
                 self.driver.quit()
             except Exception:
                 pass
-            self.driver = None
+        self.driver = None

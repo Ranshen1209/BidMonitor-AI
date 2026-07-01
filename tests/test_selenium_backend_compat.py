@@ -11,6 +11,7 @@ class SeleniumBackendCompatTests(unittest.TestCase):
         self.assertTrue(hasattr(sb, "SeleniumCrawler"))
         self.assertTrue(hasattr(sb, "SharedBrowserManager"))
         self.assertIn("SELENIUM_AVAILABLE", dir(sb))
+        self.assertIn("IMPORT_ERROR_MSG", dir(sb))
 
     def test_legacy_shim_reexports(self):
         # 向后兼容:旧路径仍可导入

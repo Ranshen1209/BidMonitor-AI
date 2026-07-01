@@ -15,13 +15,13 @@ def _load_backends() -> Tuple[Optional[Type[BrowserCrawler]], Optional[Type[Brow
         from .cloak_backend import CloakBrowserCrawler, CLOAK_AVAILABLE
         if CLOAK_AVAILABLE:
             cloak = CloakBrowserCrawler
-    except Exception as e:  # pragma: no cover - import 保护
+    except ImportError as e:  # pragma: no cover - import 保护
         logger.debug(f"CloakBrowser 后端不可用: {e}")
     try:
         from .selenium_backend import SeleniumCrawler, SELENIUM_AVAILABLE
         if SELENIUM_AVAILABLE:
             selenium = SeleniumCrawler
-    except Exception as e:  # pragma: no cover - import 保护
+    except ImportError as e:  # pragma: no cover - import 保护
         logger.debug(f"Selenium 后端不可用: {e}")
     return cloak, selenium
 
@@ -45,10 +45,14 @@ def shutdown_browsers() -> None:
     try:
         from .cloak_backend import CloakBrowserManager
         CloakBrowserManager.close()
-    except Exception:
+    except ImportError:
         pass
+    except Exception as e:
+        logger.warning(f"[browser] CloakBrowserManager.close() failed: {e}")
     try:
         from .selenium_backend import SharedBrowserManager
         SharedBrowserManager.close()
-    except Exception:
+    except ImportError:
         pass
+    except Exception as e:
+        logger.warning(f"[browser] SharedBrowserManager.close() failed: {e}")

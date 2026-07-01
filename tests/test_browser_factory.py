@@ -34,6 +34,10 @@ class FactoryTests(unittest.TestCase):
             c = browser_pkg.create_browser_crawler({}, "s", "https://ex.com")
             self.assertIsNone(c)
 
+    def test_shutdown_browsers_no_backends(self):
+        # neither backend module exists yet; must complete without raising
+        browser_pkg.shutdown_browsers()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -12,9 +12,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 try:
     from .database.storage import Storage, BidInfo
     from .matcher.keyword import KeywordMatcher
-    from .notifier.email import EmailNotifier
-    from .notifier.sms import SMSNotifier
-    
+    from .results.ai_extractor import enrich_new_bid
+
     from .crawler.ccgp import CCGPCrawler
     from .crawler.chinabidding import ChinaBiddingCrawler
     from .crawler.ebnew import EbnewCrawler
@@ -30,9 +29,8 @@ try:
 except ImportError:
     from database.storage import Storage, BidInfo
     from matcher.keyword import KeywordMatcher
-    from notifier.email import EmailNotifier
-    from notifier.sms import SMSNotifier
-    
+    from results.ai_extractor import enrich_new_bid
+
     from crawler.ccgp import CCGPCrawler
     from crawler.chinabidding import ChinaBiddingCrawler
     from crawler.ebnew import EbnewCrawler
@@ -55,56 +53,33 @@ def get_all_crawlers():
         'chinabidding': ChinaBiddingCrawler,
     }
 
+DEFAULT_URL_LIST_PATH = "/Users/cervine/Documents/Rule-Project/projects/opportunity-collection/output/materials/bid_related_url_list.txt"
+
+
+def _looks_like_url(value: str) -> bool:
+    return value.startswith("http://") or value.startswith("https://")
+
+
 # 默认内置网站配置 (用于通用爬虫)
 def get_default_sites():
-    """获取默认的内置网站列表"""
-    return {
-        'chinabidding': {'name': '中国采购与招标网', 'url': 'http://www.chinabidding.cn/'},
-        'dlzb': {'name': '中国电力招标网', 'url': 'http://www.dlzb.com/'},
-        'chinabiddingcc': {'name': '中国采购招标网', 'url': 'http://www.chinabidding.cc/'},
-        'gdtzb': {'name': '国电投招标网', 'url': 'http://www.gdtzb.com'},
-        'cpeinet': {'name': '中国电力设备信息网', 'url': 'http://www.cpeinet.com.cn/'},
-        'espic': {'name': '电能e招采', 'url': 'https://ebid.espic.com.cn/'},
-        'chng': {'name': '华能集团电子商务平台', 'url': 'http://ec.chng.com.cn/ecmall/'},
-        'powerchina': {'name': '中国电建采购电子商务平台', 'url': 'http://ec.powerchina.cn'},
-        'powerchina_bid': {'name': '中国电建采购招标数智化平台', 'url': 'https://bid.powerchina.cn/bidweb/'},
-        'powerchina_ec': {'name': '中国电建设备物资集中采购平台', 'url': 'https://ec.powerchina.cn/'},
-        'powerchina_scm': {'name': '中国电建供应链云服务平台', 'url': 'https://scm.powerchina.cn/'},
-        'powerchina_idx': {'name': '中国电建承包商管理系统', 'url': 'http://bid.powerchina.cn/index'},
-        'powerchina_nw': {'name': '中国电建西北勘测设计研究院', 'url': 'http://ec1.powerchina.cn'},
-        'ceec': {'name': '中国能建电子采购平台', 'url': 'https://ec.ceec.net.cn/'},
-        'chdtp': {'name': '中国华电电子商务平台', 'url': 'http://www.chdtp.com/'},
-        'chec_gys': {'name': '中国华电科工供应商填报系统', 'url': 'http://gys.chec.com.cn:90'},
-        'chinazbcg': {'name': '中国招投标信息网', 'url': 'http://www.chinazbcg.com'},
-        'cdt': {'name': '中国大唐电子商务平台', 'url': 'http://www.cdt-ec.com/'},
-        'ebidding': {'name': '国义招标', 'url': 'http://www.ebidding.com/portal/'},
-        'neep': {'name': '国家能源e购', 'url': 'https://www.neep.shop/'},
-        'ceic': {'name': '国家能源集团生态协作平台', 'url': 'https://cooperation.ceic.com/'},
-        'sgcc': {'name': '国家电网电子商务平台', 'url': 'https://ecp.sgcc.com.cn/'},
-        'cecep': {'name': '中国节能环保电子采购平台', 'url': 'http://www.ebidding.cecep.cn/'},
-        'gdg': {'name': '广州发展集团电子采购平台', 'url': 'https://eps.gdg.com.cn/'},
-        'crpower': {'name': '华润电力', 'url': 'https://b2b.crpower.com.cn'},
-        'crc': {'name': '华润集团守正电子招标采购平台', 'url': 'https://szecp.crc.com.cn/'},
-        'longi': {'name': '隆基股份SRM系统', 'url': 'https://srm.longi.com:6080'},
-        'cgnpc': {'name': '中广核电子商务平台', 'url': 'https://ecp.cgnpc.com.cn'},
-        'dongfang': {'name': '东方电气', 'url': 'http://nsrm.dongfang.com/'},
-        'zjycgzx': {'name': '浙江云采购中心', 'url': 'https://www.zjycgzx.com'},
-        'ctg': {'name': '中国三峡电子采购平台', 'url': 'https://eps.ctg.com.cn/'},
-        'sdicc': {'name': '国投集团电子采购平台', 'url': 'https://www.sdicc.com.cn/'},
-        'csg': {'name': '中国南方电网供应链服务平台', 'url': 'http://www.bidding.csg.cn/'},
-        'sgccetp': {'name': '国网电子商务平台电工交易专区', 'url': 'https://sgccetp.com.cn/'},
-        'powerbeijing': {'name': '北京京能电子商务平台', 'url': 'http://www.powerbeijing-ec.com'},
-        'ccccltd': {'name': '中交集团供应链管理系统', 'url': 'http://ec.ccccltd.cn/'},
-        'jchc': {'name': '江苏交通控股', 'url': 'https://zbcg.jchc.cn/portal'},
-        'minmetals': {'name': '中国五矿集团供应链管理平台', 'url': 'https://ec.minmetals.com.cn/'},
-        'sunwoda': {'name': '欣旺达SRM', 'url': 'https://srm.sunwoda.com/'},
-        'cnbm': {'name': '中国建材集团采购平台', 'url': 'https://c.cnbm.com.cn/'},
-        'hghn': {'name': '华光环能数字化采购管理平台', 'url': 'https://hgcg.hghngroup.com/'},
-        'xcmg': {'name': '徐工全球数字化供应链系统平台', 'url': 'http://xdsc.xcmg.com:8985/'},
-        'xinecai': {'name': '安天智采', 'url': 'http://www.xinecai.com'},
-        'ariba': {'name': '远景SAP系统', 'url': 'https://service.ariba.com/'},
-        'faw': {'name': '中国一汽电子招标采购交易平台', 'url': 'https://srm.etp.faw.cn/staging'},
-    }
+    """从外部 URL 清单生成默认内置网站列表。"""
+    sites = {}
+    if not os.path.exists(DEFAULT_URL_LIST_PATH):
+        return sites
+
+    seen = set()
+    with open(DEFAULT_URL_LIST_PATH, 'r', encoding='utf-8-sig') as f:
+        for line in f:
+            url = line.strip()
+            if not _looks_like_url(url) or url in seen:
+                continue
+            seen.add(url)
+            key = f"url_list_{len(sites) + 1:03d}"
+            sites[key] = {
+                'name': f"上海招投标URL {len(sites) + 1:03d}",
+                'url': url
+            }
+    return sites
 
 
 class MonitorCore:
@@ -120,7 +95,8 @@ class MonitorCore:
                  email_config: Dict[str, Any] = None,
                  sms_config: Dict[str, Any] = None,
                  log_callback: Callable[[str], None] = None,
-                 ai_config: Dict[str, Any] = None):
+                 ai_config: Dict[str, Any] = None,
+                 crawler_overrides: Dict[str, Any] = None):
         """
         初始化监控核心
         
@@ -142,6 +118,8 @@ class MonitorCore:
         self.email = email
         self.phone = phone
         self.log_callback = log_callback or (lambda x: None)
+        self.crawler_overrides = crawler_overrides or {}
+        self.ai_config_for_extraction = ai_config or {}
         
         # 初始化组件
         self.storage = Storage()
@@ -149,11 +127,14 @@ class MonitorCore:
         
         # 加载配置文件
         self.config = self._load_config()
+        self._apply_crawler_overrides()
         
         # 初始化通知器
         if email_config:
+            from notifier.email import EmailNotifier
             self.email_notifier = EmailNotifier(email_config)
         elif self.config.get('email'):
+            from notifier.email import EmailNotifier
             email_cfg = self.config['email'].copy()
             if email:
                 email_cfg['receiver'] = email
@@ -162,8 +143,10 @@ class MonitorCore:
             self.email_notifier = None
         
         if sms_config:
+            from notifier.sms import SMSNotifier
             self.sms_notifier = SMSNotifier(sms_config)
         elif self.config.get('sms'):
+            from notifier.sms import SMSNotifier
             self.sms_notifier = SMSNotifier(self.config['sms'])
         else:
             self.sms_notifier = None
@@ -180,6 +163,21 @@ class MonitorCore:
         
         # 初始化爬虫
         self.crawlers = self._init_crawlers()
+
+    def _apply_crawler_overrides(self):
+        """应用 Web 配置传入的爬虫相关覆盖项。"""
+        if not self.crawler_overrides:
+            return
+
+        crawler_config = self.config.get('crawler', {})
+        for key in ['enabled_sites', 'use_selenium']:
+            if key in self.crawler_overrides:
+                crawler_config[key] = self.crawler_overrides[key]
+        self.config['crawler'] = crawler_config
+
+        for key in ['custom_sites', 'csv_url_sources']:
+            if key in self.crawler_overrides:
+                self.config[key] = self.crawler_overrides[key]
     
     def clear_data(self):
         """清空所有历史数据"""
@@ -188,7 +186,6 @@ class MonitorCore:
 
     def _load_config(self) -> Dict[str, Any]:
         """加载配置文件"""
-        import yaml
         config_paths = [
             'config/config.yaml',
             '../config/config.yaml',
@@ -197,6 +194,7 @@ class MonitorCore:
         
         for path in config_paths:
             if os.path.exists(path):
+                import yaml
                 with open(path, 'r', encoding='utf-8') as f:
                     return yaml.safe_load(f) or {}
         
@@ -207,6 +205,7 @@ class MonitorCore:
         crawlers = []
         crawler_config = self.config.get('crawler', {})
         crawler_config['search_keywords'] = self.keywords[:3]
+        crawler_config['log_callback'] = self.log
         
         # 获取启用的网站列表
         enabled = crawler_config.get('enabled_sites', [])
@@ -272,6 +271,25 @@ class MonitorCore:
                     crawlers.append(crawler)
             except Exception as e:
                 self.log(f"[WARN] Failed to load custom crawler {site.get('name')}: {e}")
+
+        # 4. 加载 URL 清单爬虫（txt/csv）
+        csv_url_sources = self.config.get('csv_url_sources', [])
+        if csv_url_sources:
+            try:
+                from crawler.url_list import UrlListCrawler
+                for source in csv_url_sources:
+                    if not source.get('enabled', True):
+                        continue
+                    name = source.get('name', 'URL列表')
+                    file_path = source.get('file_path', '')
+                    if not file_path:
+                        self.log(f"[WARN] URL list source {name} missing file_path")
+                        continue
+                    crawler = UrlListCrawler(crawler_config, source)
+                    crawlers.append(crawler)
+                    self.log(f"[OK] Loaded URL list crawler: {name}")
+            except Exception as e:
+                self.log(f"[WARN] Failed to load URL list crawler: {e}")
         
         return crawlers
     
@@ -369,9 +387,17 @@ class MonitorCore:
                                 })
                         
                         if not self.storage.exists(bid):
-                            self.storage.save(bid, notified=False)
-                            all_matched_bids.append(bid)
-                            matched_count += 1
+                            result_id = self.storage.save(bid, notified=False)
+                            if result_id:
+                                all_matched_bids.append(bid)
+                                matched_count += 1
+                                enrich_new_bid(
+                                    self.storage,
+                                    result_id,
+                                    bid,
+                                    self.ai_config_for_extraction,
+                                    log_callback=self.log,
+                                )
                 
                 self.log(f"[OK] {crawler.name}: Found {len(bids)} items, {matched_count} new matches")
                 
@@ -428,8 +454,8 @@ class MonitorCore:
         # 关闭共享浏览器以释放内存
         try:
             shutdown_browsers()
-            self.log("✅ 已关闭共享浏览器，释放内存")
-        except:
+            self.log("✅ 已关闭共享浏览器,释放内存")
+        except Exception:
             pass
         
         return {

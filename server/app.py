@@ -367,9 +367,9 @@ def load_config() -> Dict[str, Any]:
         },
         'ai_config': {
             'enable': False,
-            'base_url': 'https://api.deepseek.com/chat/completions',
+            'base_url': 'https://api.sakrylle.com/v1',
             'api_key': '',  # 请填入您的API Key
-            'model': 'deepseek-chat',
+            'model': 'grok-4.20-fast',
             'endpoint_type': 'responses',
         },
         'contacts': [],  # 开源版本默认空
@@ -1550,9 +1550,9 @@ async def test_ai(user: Dict[str, Any] = Depends(get_current_user)):
         extractor = AIExtractor(
             {
                 "enable": True,
-                "base_url": ai_config.get("base_url", "https://api.deepseek.com/chat/completions"),
+                "base_url": ai_config.get("base_url", "https://api.sakrylle.com/v1"),
                 "api_key": ai_config["api_key"],
-                "model": ai_config.get("model", "deepseek-chat"),
+                "model": ai_config.get("model", "grok-4.20-fast"),
                 "endpoint_type": ai_config.get("endpoint_type") or (
                     "chat_completions"
                     if (ai_config.get("base_url") or "").rstrip("/").lower().endswith("/chat/completions")

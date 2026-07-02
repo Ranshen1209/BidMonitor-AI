@@ -1,4 +1,6 @@
 const API = '';
+const DEFAULT_AI_BASE_URL = 'https://api.sakrylle.com/v1';
+const DEFAULT_AI_MODEL = 'grok-4.20-fast';
 let currentConfig = {}, currentSites = [], currentUsers = [], currentUser = null;
 let currentResults = [], resultSettings = null, selectedResultIds = new Set(), activeResultId = null;
 let activeDetailManualOverrides = {};
@@ -905,10 +907,10 @@ async function testVoice() {
 function showAiConfig() {
     document.getElementById('aiEnabled').checked = currentConfig.ai_enabled || false;
     const ac = currentConfig.ai_config || {};
-    document.getElementById('aiUrl').value = ac.base_url || ac.url || 'https://api.deepseek.com/chat/completions';
+    document.getElementById('aiUrl').value = ac.base_url || ac.url || DEFAULT_AI_BASE_URL;
     document.getElementById('aiEndpointType').value = ac.endpoint_type || 'responses';
     document.getElementById('aiKey').value = '';
-    document.getElementById('aiModel').value = ac.model || 'deepseek-chat';
+    document.getElementById('aiModel').value = ac.model || DEFAULT_AI_MODEL;
     document.getElementById('aiModal').classList.add('active');
 }
 

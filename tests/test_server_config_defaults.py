@@ -36,6 +36,8 @@ class ServerConfigDefaultsTests(unittest.TestCase):
         self.assertEqual(config["site_metadata"], {})
         self.assertIn("non_follow_reason_tags", config)
         self.assertIn("地域问题", config["non_follow_reason_tags"])
+        self.assertEqual(config["ai_config"]["base_url"], "https://api.sakrylle.com/v1")
+        self.assertEqual(config["ai_config"]["model"], "grok-4.20-fast")
         self.assertEqual(config["ai_config"]["endpoint_type"], "responses")
         self.assertNotIn("custom_sites", config)
 

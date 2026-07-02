@@ -87,6 +87,7 @@ class AIExtractor:
         if endpoint_type == "chat_completions":
             payload = {
                 "model": self.config.get("model"),
+                "stream": False,
                 "messages": [
                     {"role": "system", "content": "You extract procurement data and reply with strict JSON only."},
                     {"role": "user", "content": prompt},
@@ -119,6 +120,7 @@ class AIExtractor:
         if endpoint_type == "chat_completions":
             payload = {
                 "model": self.config.get("model"),
+                "stream": False,
                 "messages": [
                     {"role": "system", "content": "Reply concisely to confirm connectivity."},
                     {"role": "user", "content": prompt},

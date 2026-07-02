@@ -448,10 +448,10 @@
             <div class="modal-header"><span class="title-label"><svg class="icon" aria-hidden="true"><use href="#icon-bot"></use></svg><span>AI配置</span></span><button class="modal-close" onclick="closeModal('aiModal')" aria-label="关闭"><svg class="icon" aria-hidden="true"><use href="#icon-x"></use></svg></button></div>
             <div class="modal-body">
                 <div class="toggle-switch"><span>启用AI分析</span><label class="switch"><input type="checkbox" id="aiEnabled"><span class="slider"></span></label></div>
-                <div class="config-section"><label class="config-label">API地址</label><input type="text" class="config-input" id="aiUrl" value="https://api.deepseek.com/chat/completions"></div>
+                <div class="config-section"><label class="config-label">API地址</label><input type="text" class="config-input" id="aiUrl" value="https://api.sakrylle.com/v1"></div>
                 <div class="config-section"><label class="config-label">接口类型</label><select class="config-input" id="aiEndpointType"><option value="responses">responses</option><option value="chat_completions">chat_completions</option></select></div>
                 <div class="config-section"><label class="config-label">API Key</label><input type="password" class="config-input" id="aiKey"><p class="hint">留空则保留原值</p></div>
-                <div class="config-section"><label class="config-label">模型</label><input type="text" class="config-input" id="aiModel" value="deepseek-chat"></div>
+                <div class="config-section"><label class="config-label">模型</label><input type="text" class="config-input" id="aiModel" value="grok-4.20-fast"></div>
             </div>
             <div class="modal-footer">
                 <button class="btn btn-outline modal-action" onclick="closeModal('aiModal')">取消</button>

@@ -54,6 +54,7 @@ class AIExtractorTests(unittest.TestCase):
         self.assertEqual(data["region"], "上海")
         self.assertEqual(post.call_args[0][0], "https://api.example.com/v1/chat/completions")
         self.assertIn("messages", post.call_args.kwargs["json"])
+        self.assertIs(post.call_args.kwargs["json"]["stream"], False)
 
     def test_test_connection_uses_responses_endpoint(self):
         config = {
@@ -90,6 +91,7 @@ class AIExtractorTests(unittest.TestCase):
         self.assertEqual(result, "ok")
         self.assertEqual(post.call_args[0][0], "https://api.example.com/v1/chat/completions")
         self.assertIn("messages", post.call_args.kwargs["json"])
+        self.assertIs(post.call_args.kwargs["json"]["stream"], False)
 
     def test_build_column_updates_extracts_three_deadline_columns(self):
         data = {

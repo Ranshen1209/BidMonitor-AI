@@ -332,15 +332,8 @@
                             <div class="config-section"><label class="config-label">项目阶段</label><select class="config-input status-select" id="detailProjectStage"></select></div>
                             <div class="config-section config-section-wide"><label class="config-label">不跟进原因</label><div id="detailNonFollowReasons" class="reason-list"></div></div>
                             <div class="config-section config-section-wide"><label class="config-label">复核备注</label><textarea class="config-input" id="detailReviewNotes" rows="3"></textarea></div>
-                            <div class="config-section"><label class="config-label">单位</label><input type="text" class="config-input" id="detailOrganization"></div>
-                            <div class="config-section"><label class="config-label">金额</label><input type="text" class="config-input" id="detailAmount"></div>
-                            <div class="config-section"><label class="config-label">金额单位</label><input type="text" class="config-input" id="detailAmountUnit"></div>
-                            <div class="config-section"><label class="config-label">地区</label><input type="text" class="config-input" id="detailRegion"></div>
-                            <div class="config-section"><label class="config-label">分类</label><input type="text" class="config-input" id="detailCategory"></div>
+                            <div class="config-section config-section-wide"><label class="config-label">字段对比</label><div id="detailFieldComparison" class="detail-field-comparison"><div class="detail-field-head"><span>字段</span><span>AI原始值</span><span>人工修正值</span><span>最终值</span></div><div id="detailManualFields"></div><div id="detailResolvedFields" class="is-hidden"></div></div></div>
                             <div class="config-section"><label class="config-label">采购单位</label><input type="text" class="config-input" id="detailPurchaser" readonly></div>
-                            <div class="config-section"><label class="config-label">报名/文件截止</label><input type="text" class="config-input" id="detailRegistrationDeadline"></div>
-                            <div class="config-section"><label class="config-label">投标截止</label><input type="text" class="config-input" id="detailSubmissionDeadline"></div>
-                            <div class="config-section"><label class="config-label">开标时间</label><input type="text" class="config-input" id="detailBidOpeningTime"></div>
                             <div class="config-section config-section-wide"><label class="config-label">AI提取状态</label><div class="detail-meta-line" id="detailStatusLine">-</div></div>
                             <div class="config-section config-section-wide"><label class="config-label">正文</label><div class="detail-text-block" id="detailTextBlock"></div></div>
                             <div class="config-section config-section-wide"><label class="config-label">AI提取数据</label><pre class="detail-code-block" id="detailAiJson"></pre></div>
@@ -477,7 +470,7 @@
                     <div class="config-section"><label class="config-label">跟进决策</label><select class="config-input" id="bulkFollowDecision"><option value="">不修改</option></select></div>
                     <div class="config-section"><label class="config-label">紧急度</label><select class="config-input" id="bulkUrgency"><option value="">不修改</option></select></div>
                     <div class="config-section"><label class="config-label">项目阶段</label><select class="config-input" id="bulkProjectStage"><option value="">不修改</option></select></div>
-                    <div class="config-section config-section-wide"><label class="config-label">不跟进原因</label><div id="bulkNonFollowReasons" class="reason-list"></div></div>
+                    <div class="config-section config-section-wide"><label class="config-label">不跟进原因</label><label class="reason-apply"><input type="checkbox" id="bulkApplyReasons"><span>更新不跟进原因（未选择任何原因时将清空）</span></label><div id="bulkNonFollowReasons" class="reason-list"></div></div>
                     <div class="config-section config-section-wide"><label class="config-label">复核备注</label><textarea class="config-input" id="bulkReviewNotes" rows="4" placeholder="批量追加说明"></textarea></div>
                 </div>
             </div>

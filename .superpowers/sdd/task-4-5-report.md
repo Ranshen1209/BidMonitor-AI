@@ -30,3 +30,18 @@ Changes:
 - `MonitorCore._apply_crawler_overrides` now copies `custom_sites` only when `enable_custom_sites` is truthy.
 - `MonitorCore._init_crawlers` ignores configured `custom_sites` unless `enable_custom_sites` is truthy.
 - Legacy browser-mode custom-site tests opt into compatibility with `enable_custom_sites`.
+
+## Task 4/5 Frontend Fix - detail comparison and bulk reason clearing
+
+Status: completed
+
+RED evidence:
+- `python3 -m unittest tests.test_static_frontend_assets -v` -> FAIL, 22 tests run, 3 failures: missing detail AI/manual/final comparison hooks, missing changed-manual-only PATCH logic, and missing bulk clear-reasons control.
+
+GREEN evidence:
+- `python3 -m unittest tests.test_static_frontend_assets -v` -> PASS, 22 tests.
+
+Changes:
+- Detail panel now renders core fields side by side as 字段 / AI原始值 / 人工修正值 / 最终值.
+- Manual correction inputs initialize from `detail.manual_overrides`; `saveResultFields()` PATCHes only changed manual fields and alerts without an API call when unchanged.
+- Bulk review now has an explicit `bulkApplyReasons` checkbox, allowing `non_follow_reasons: []` to clear reasons while still requiring a reason when setting 不跟进.

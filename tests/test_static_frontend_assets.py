@@ -277,6 +277,68 @@ class StaticFrontendAssetsTests(unittest.TestCase):
         for selector in [".results-table", ".result-detail-panel", ".bulk-review-grid", ".result-filter-bar"]:
             self.assertIn(selector, css)
 
+    def test_detail_panel_compares_ai_manual_and_resolved_values(self):
+        html = self.read("index.html")
+        js = self.read("app.js")
+        css = self.read("styles.css")
+
+        for hook in [
+            "detailFieldComparison",
+            "detailResolvedFields",
+            "detailManualFields",
+        ]:
+            self.assertIn(hook, html + js)
+
+        for label in ["字段", "AI原始值", "人工修正值", "最终值"]:
+            self.assertIn(label, html + js)
+
+        for key in [
+            "organization",
+            "amount",
+            "amount_unit",
+            "region",
+            "category",
+            "registration_deadline",
+            "submission_deadline",
+            "bid_opening_time",
+        ]:
+            self.assertIn(key, js)
+
+        self.assertIn("manual_overrides", js)
+        self.assertIn("ai_extracted_data", js)
+        self.assertIn("detail.deadlines", js)
+        self.assertIn(".detail-field-comparison", css)
+
+    def test_manual_field_save_only_patches_changed_manual_overrides(self):
+        js = self.read("app.js")
+
+        self.assertIn("activeDetailManualOverrides", js)
+        self.assertIn("collectChangedManualOverrides", js)
+        self.assertRegex(js, r"manualOverrides\s*=\s*detail\.manual_overrides\s*\|\|\s*\{\}")
+        self.assertRegex(js, r"if\s*\(\s*value\s*!==\s*originalValue\s*\)")
+        self.assertRegex(js, r"if\s*\(\s*!Object\.keys\(payload\)\.length\s*\)")
+
+        save_match = re.search(
+            r"async function saveResultFields\(id\)\s*\{(?P<body>.*?)\n\}",
+            js,
+            re.S,
+        )
+        self.assertIsNotNone(save_match)
+        save_body = save_match.group("body")
+        self.assertIn("collectChangedManualOverrides()", save_body)
+        self.assertNotIn("organization: document.getElementById('detailOrganization')", save_body)
+        self.assertNotIn("amount: document.getElementById('detailAmount')", save_body)
+
+    def test_bulk_review_can_explicitly_clear_non_follow_reasons(self):
+        html = self.read("index.html")
+        js = self.read("app.js")
+
+        self.assertIn('id="bulkApplyReasons"', html)
+        self.assertIn("bulkApplyReasons", js)
+        self.assertIn("payload.update.non_follow_reasons = reasons", js)
+        self.assertRegex(js, r"if\s*\(\s*applyReasons\s*\)\s*\{[^}]*payload\.update\.non_follow_reasons\s*=\s*reasons", re.S)
+        self.assertRegex(js, r"follow_decision'\)\.value\s*===\s*'not_follow'|payload\.update\.follow_decision\s*===\s*'not_follow'")
+
     def test_removed_colleague_entry_points_are_not_visible(self):
         html = self.read("index.html")
         js = self.read("app.js")

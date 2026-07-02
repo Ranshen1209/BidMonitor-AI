@@ -1258,10 +1258,66 @@ input:checked + .slider::before {
     grid-column: 1 / -1;
 }
 
+.detail-field-comparison {
+    overflow-x: auto;
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius-md);
+    background: var(--canvas-soft);
+}
+
+.detail-field-head,
+.detail-field-row {
+    display: grid;
+    grid-template-columns: 96px minmax(120px, 1fr) minmax(140px, 1fr) minmax(120px, 1fr);
+    gap: 8px;
+    align-items: center;
+    min-width: 620px;
+    padding: 8px 10px;
+}
+
+.detail-field-head {
+    border-bottom: 1px solid var(--hairline);
+    color: var(--body);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.detail-field-row + .detail-field-row {
+    border-top: 1px solid var(--hairline-soft);
+}
+
+.detail-field-name,
+.detail-ai-value,
+.detail-resolved-value {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    font-size: 12px;
+    line-height: 1.35;
+}
+
+.detail-field-name {
+    color: var(--body);
+}
+
+.detail-manual-input {
+    min-height: 34px;
+    padding: 7px 9px;
+    font-size: 12px;
+}
+
 .bulk-review-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 12px;
+}
+
+.reason-apply {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 28px;
+    color: var(--body);
+    font-size: 13px;
 }
 
 .reason-list {

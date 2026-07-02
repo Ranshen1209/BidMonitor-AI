@@ -1,6 +1,7 @@
 const API = '';
 let currentConfig = {}, currentSites = [], currentUsers = [], currentUser = null;
 let currentResults = [], resultSettings = null, selectedResultIds = new Set(), activeResultId = null;
+let activeDetailManualOverrides = {};
 let editingUserId = null;
 let nextRunTime = null, countdownInterval = null;
 let statusTimer = null, logsTimer = null;
@@ -19,6 +20,16 @@ const RESULT_LABELS = {
     urgency: { low: '低', medium: '中', high: '高', urgent: '紧急' },
     project_stage: { lead: '线索', screening: '筛选', following: '跟进中', submitted: '已投', ended: '结束' },
 };
+const DETAIL_FIELD_DEFS = [
+    { key: 'organization', label: '单位', inputId: 'detailOrganization' },
+    { key: 'amount', label: '金额', inputId: 'detailAmount' },
+    { key: 'amount_unit', label: '金额单位', inputId: 'detailAmountUnit' },
+    { key: 'region', label: '地区', inputId: 'detailRegion' },
+    { key: 'category', label: '分类', inputId: 'detailCategory' },
+    { key: 'registration_deadline', label: '报名/文件截止', inputId: 'detailRegistrationDeadline' },
+    { key: 'submission_deadline', label: '投标截止', inputId: 'detailSubmissionDeadline' },
+    { key: 'bid_opening_time', label: '开标时间', inputId: 'detailBidOpeningTime' },
+];
 
 async function apiFetch(path, options = {}) {
     const headers = options.headers || {};
@@ -365,11 +376,53 @@ function renderEmptyDetailPanel(message = '选择一条结果查看详情') {
     document.getElementById('detailGrid').classList.add('is-hidden');
     document.getElementById('detailFieldsSaveButton').disabled = true;
     document.getElementById('detailReviewSaveButton').disabled = true;
+    activeDetailManualOverrides = {};
 }
 
-function detailInputValue(detail, key) {
+function detailResolvedValue(detail, key) {
     const resolved = detail.resolved || {};
     return resolved[key] || detail[key] || '';
+}
+
+function detailAiOriginalValue(detail, key) {
+    const ai = detail.ai_extracted_data || {};
+    const deadlines = ai.deadlines || detail.deadlines || {};
+    if (key === 'registration_deadline') return deadlines.registration || deadlines.registration_deadline || '';
+    if (key === 'submission_deadline') return deadlines.submission || deadlines.submission_deadline || '';
+    if (key === 'bid_opening_time') return deadlines.bid_opening || deadlines.bid_opening_time || '';
+    return ai[key] || '';
+}
+
+function renderDetailFieldComparison(detail) {
+    const manualOverrides = detail.manual_overrides || {};
+    activeDetailManualOverrides = { ...manualOverrides };
+    const manualContainer = document.getElementById('detailManualFields');
+    const resolvedContainer = document.getElementById('detailResolvedFields');
+    if (!manualContainer || !resolvedContainer) return;
+    manualContainer.innerHTML = DETAIL_FIELD_DEFS.map(field => {
+        const manualValue = manualOverrides[field.key] || '';
+        const aiValue = detailAiOriginalValue(detail, field.key);
+        const resolvedValue = detailResolvedValue(detail, field.key);
+        return `<div class="detail-field-row">
+            <span class="detail-field-name">${escapeHtml(field.label)}</span>
+            <span class="detail-ai-value">${escapeHtml(aiValue || '-')}</span>
+            <input type="text" class="config-input detail-manual-input" id="${field.inputId}" data-field-key="${field.key}" value="${escapeAttr(manualValue)}">
+            <span class="detail-resolved-value">${escapeHtml(resolvedValue || '-')}</span>
+        </div>`;
+    }).join('');
+    resolvedContainer.textContent = DETAIL_FIELD_DEFS.map(field => detailResolvedValue(detail, field.key)).join('\n');
+}
+
+function collectChangedManualOverrides() {
+    const payload = {};
+    DETAIL_FIELD_DEFS.forEach(field => {
+        const input = document.getElementById(field.inputId);
+        if (!input) return;
+        const value = input.value.trim();
+        const originalValue = activeDetailManualOverrides[field.key] || '';
+        if (value !== originalValue) payload[field.key] = value;
+    });
+    return payload;
 }
 
 async function openResultDetail(id) {
@@ -400,15 +453,8 @@ function renderResultDetail(detail) {
     document.getElementById('detailUrgency').innerHTML = buildOptions(resultSettings.urgencies, RESULT_LABELS.urgency, detail.urgency);
     document.getElementById('detailProjectStage').innerHTML = buildOptions(resultSettings.project_stages, RESULT_LABELS.project_stage, detail.project_stage);
     document.getElementById('detailReviewNotes').value = detail.review_notes || '';
-    document.getElementById('detailOrganization').value = detailInputValue(detail, 'organization');
-    document.getElementById('detailAmount').value = detailInputValue(detail, 'amount');
-    document.getElementById('detailAmountUnit').value = detailInputValue(detail, 'amount_unit');
-    document.getElementById('detailRegion').value = detailInputValue(detail, 'region');
-    document.getElementById('detailCategory').value = detailInputValue(detail, 'category');
+    renderDetailFieldComparison(detail);
     document.getElementById('detailPurchaser').value = detail.purchaser || '';
-    document.getElementById('detailRegistrationDeadline').value = detailInputValue(detail, 'registration_deadline');
-    document.getElementById('detailSubmissionDeadline').value = detailInputValue(detail, 'submission_deadline');
-    document.getElementById('detailBidOpeningTime').value = detailInputValue(detail, 'bid_opening_time');
     document.getElementById('detailStatusLine').textContent = `${detail.ai_extract_status || '-'} / ${detail.detail_fetch_status || '-'}`;
     document.getElementById('detailTextBlock').textContent = detail.detail_text || detail.content || '';
     document.getElementById('detailAiJson').textContent = JSON.stringify(detail.ai_extracted_data || {}, null, 2);
@@ -463,16 +509,11 @@ async function saveResultReview(id) {
 }
 
 async function saveResultFields(id) {
-    const payload = {
-        organization: document.getElementById('detailOrganization').value.trim(),
-        amount: document.getElementById('detailAmount').value.trim(),
-        amount_unit: document.getElementById('detailAmountUnit').value.trim(),
-        region: document.getElementById('detailRegion').value.trim(),
-        category: document.getElementById('detailCategory').value.trim(),
-        registration_deadline: document.getElementById('detailRegistrationDeadline').value.trim(),
-        submission_deadline: document.getElementById('detailSubmissionDeadline').value.trim(),
-        bid_opening_time: document.getElementById('detailBidOpeningTime').value.trim(),
-    };
+    const payload = collectChangedManualOverrides();
+    if (!Object.keys(payload).length) {
+        alert('没有字段修正需要保存');
+        return;
+    }
     try {
         const res = await apiFetch(`/api/results/${id}/fields`, {
             method: 'PATCH',
@@ -521,6 +562,7 @@ function openBulkReview() {
     document.getElementById('bulkUrgency').value = '';
     document.getElementById('bulkProjectStage').value = '';
     document.getElementById('bulkReviewNotes').value = '';
+    document.getElementById('bulkApplyReasons').checked = false;
     renderReasonCheckboxes('bulkNonFollowReasons', []);
     document.getElementById('bulkReviewModal').classList.add('active');
 }
@@ -541,10 +583,13 @@ async function saveBulkReview() {
         if (value) payload.update[key] = value;
     });
     const reasons = collectReasonSelections('bulkNonFollowReasons');
+    const applyReasons = document.getElementById('bulkApplyReasons').checked;
     const notes = document.getElementById('bulkReviewNotes').value.trim();
-    if (reasons.length) payload.update.non_follow_reasons = reasons;
+    if (applyReasons) {
+        payload.update.non_follow_reasons = reasons;
+    }
     if (notes) payload.update.review_notes = notes;
-    if (payload.update.follow_decision === 'not_follow' && !payload.update.non_follow_reasons) {
+    if (payload.update.follow_decision === 'not_follow' && (!applyReasons || reasons.length === 0)) {
         alert('批量设置为不跟进时必须至少选择一个原因');
         return;
     }

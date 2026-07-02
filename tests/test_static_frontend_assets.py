@@ -95,6 +95,44 @@ class StaticFrontendAssetsTests(unittest.TestCase):
         narrow_css = narrow_query.group("body")
         self.assertRegex(narrow_css, r"body\s*\{[^}]*padding-bottom:\s*calc\(70px \+ env\(safe-area-inset-bottom\)\)")
 
+    def test_desktop_sidebar_has_brand_and_collapsed_state_contract(self):
+        html = self.read("index.html")
+        js = self.read("app.js")
+        css = self.read("styles.css")
+
+        self.assertIn('class="nav-brand"', html)
+        self.assertIn('class="nav-brand-title"', html)
+        self.assertIn('class="nav-brand-subtitle"', html)
+        self.assertIn('id="sidebarCollapseButton"', html)
+        self.assertIn('onclick="toggleSidebarCollapse()"', html)
+        for label in ["BidMonitor", "招标信息监控系统"]:
+            self.assertIn(label, html)
+
+        self.assertIn("SIDEBAR_COLLAPSED_KEY", js)
+        self.assertIn("function applySidebarCollapsedState", js)
+        self.assertIn("function toggleSidebarCollapse", js)
+        self.assertIn("localStorage.getItem(SIDEBAR_COLLAPSED_KEY)", js)
+        self.assertIn("localStorage.setItem(SIDEBAR_COLLAPSED_KEY", js)
+        self.assertIn("checkAuth()", js)
+
+        self.assertRegex(css, r"--nav-sidebar-width:\s*184px")
+        self.assertRegex(css, r"--nav-sidebar-collapsed-width:\s*72px")
+        self.assertRegex(css, r"\.app-shell\.nav-collapsed\.active\s*\{[^}]*padding-left:\s*var\(--nav-sidebar-collapsed-width\)")
+        self.assertRegex(css, r"\.app-shell\.nav-collapsed\s+\.nav-tabs\s*\{[^}]*width:\s*var\(--nav-sidebar-collapsed-width\)")
+        self.assertRegex(css, r"\.app-shell\.nav-collapsed\s+\.nav-label")
+        self.assertRegex(css, r"\.nav-brand\s*\{")
+        self.assertRegex(css, r"\.nav-list\s*\{")
+
+    def test_results_layout_wraps_filters_without_page_overflow(self):
+        css = self.read("styles.css")
+
+        self.assertRegex(css, r"\.result-filter-bar\s*\{[^}]*grid-template-columns:\s*repeat\(auto-fit,\s*minmax\(140px,\s*1fr\)\)")
+        self.assertRegex(css, r"\.filter-search\s*\{[^}]*grid-column:\s*span\s+2")
+        self.assertRegex(css, r"\.result-filter-action\s*\{[^}]*width:\s*100%")
+        self.assertRegex(css, r"\.results-shell\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+minmax\(340px,\s*520px\)")
+        self.assertRegex(css, r"\.results-table-wrap\s*\{[^}]*min-width:\s*0")
+        self.assertRegex(css, r"\.result-detail-panel\s*\{[^}]*min-width:\s*0")
+
     def test_behavioral_dom_contract_is_preserved(self):
         html = self.read("index.html")
 

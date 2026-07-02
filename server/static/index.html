@@ -283,8 +283,8 @@
                     <input type="text" class="config-input" id="resultSourceFilter" placeholder="来源" onkeydown="if (event.key === 'Enter') loadResults()">
                     <input type="text" class="config-input" id="resultRegionFilter" placeholder="地区" onkeydown="if (event.key === 'Enter') loadResults()">
                     <input type="text" class="config-input" id="resultCategoryFilter" placeholder="分类" onkeydown="if (event.key === 'Enter') loadResults()">
-                    <button class="btn btn-outline" onclick="loadResults()"><svg class="icon icon-sm" aria-hidden="true"><use href="#icon-refresh"></use></svg><span>刷新</span></button>
-                    <button class="btn btn-primary" onclick="openBulkReview()"><svg class="icon icon-sm" aria-hidden="true"><use href="#icon-check"></use></svg><span>批量编辑</span></button>
+                    <button class="btn btn-outline result-filter-action" onclick="loadResults()"><svg class="icon icon-sm" aria-hidden="true"><use href="#icon-refresh"></use></svg><span>刷新</span></button>
+                    <button class="btn btn-primary result-filter-action" onclick="openBulkReview()"><svg class="icon icon-sm" aria-hidden="true"><use href="#icon-check"></use></svg><span>批量编辑</span></button>
                 </div>
                 <div class="results-shell">
                     <div class="results-table-wrap">
@@ -497,12 +497,26 @@
         </div>
     </div>
 
-    <nav class="nav-tabs">
-        <button class="nav-tab active" data-page="home" onclick="showPage('home', this)"><span class="nav-tab-icon"><svg class="icon" aria-hidden="true"><use href="#icon-home"></use></svg></span><span>控制台</span></button>
-        <button class="nav-tab" data-page="results" onclick="showPage('results', this)"><span class="nav-tab-icon"><svg class="icon" aria-hidden="true"><use href="#icon-list"></use></svg></span><span>结果</span></button>
-        <button class="nav-tab" data-page="sites" onclick="showPage('sites', this)"><span class="nav-tab-icon"><svg class="icon" aria-hidden="true"><use href="#icon-globe"></use></svg></span><span>网站</span></button>
-        <button class="nav-tab" data-page="users" data-admin-only onclick="showPage('users', this)"><span class="nav-tab-icon"><svg class="icon" aria-hidden="true"><use href="#icon-users"></use></svg></span><span>用户</span></button>
-        <button class="nav-tab" data-page="config" onclick="showPage('config', this)"><span class="nav-tab-icon"><svg class="icon" aria-hidden="true"><use href="#icon-settings"></use></svg></span><span>配置</span></button>
+    <nav class="nav-tabs" aria-label="主导航">
+        <div class="nav-brand">
+            <div class="nav-brand-main">
+                <svg class="icon brand-mark" aria-hidden="true"><use href="#icon-search"></use></svg>
+                <div class="nav-brand-copy">
+                    <span class="nav-brand-title">BidMonitor</span>
+                    <span class="nav-brand-subtitle">招标信息监控系统</span>
+                </div>
+            </div>
+            <button class="nav-collapse-btn" id="sidebarCollapseButton" type="button" onclick="toggleSidebarCollapse()" aria-label="折叠导航" title="折叠导航">
+                <svg class="icon icon-sm" aria-hidden="true"><use href="#icon-chevron-right"></use></svg>
+            </button>
+        </div>
+        <div class="nav-list">
+            <button class="nav-tab active" data-page="home" onclick="showPage('home', this)" aria-label="控制台" title="控制台"><span class="nav-tab-icon"><svg class="icon" aria-hidden="true"><use href="#icon-home"></use></svg></span><span class="nav-label">控制台</span></button>
+            <button class="nav-tab" data-page="results" onclick="showPage('results', this)" aria-label="结果" title="结果"><span class="nav-tab-icon"><svg class="icon" aria-hidden="true"><use href="#icon-list"></use></svg></span><span class="nav-label">结果</span></button>
+            <button class="nav-tab" data-page="sites" onclick="showPage('sites', this)" aria-label="网站" title="网站"><span class="nav-tab-icon"><svg class="icon" aria-hidden="true"><use href="#icon-globe"></use></svg></span><span class="nav-label">网站</span></button>
+            <button class="nav-tab" data-page="users" data-admin-only onclick="showPage('users', this)" aria-label="用户" title="用户"><span class="nav-tab-icon"><svg class="icon" aria-hidden="true"><use href="#icon-users"></use></svg></span><span class="nav-label">用户</span></button>
+            <button class="nav-tab" data-page="config" onclick="showPage('config', this)" aria-label="配置" title="配置"><span class="nav-tab-icon"><svg class="icon" aria-hidden="true"><use href="#icon-settings"></use></svg></span><span class="nav-label">配置</span></button>
+        </div>
     </nav>
     </div>
 </body>

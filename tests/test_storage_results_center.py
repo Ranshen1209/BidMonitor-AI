@@ -135,6 +135,13 @@ class StorageResultsCenterTests(unittest.TestCase):
         self.assertEqual(total, 1)
         self.assertEqual(rows[0].id, result_id)
 
+    def test_query_results_rejects_unknown_filter_keys(self):
+        storage = self.make_storage()
+        storage.save(BidInfo("项目A", "https://example.com/a", "2026-07-01", "源"))
+
+        with self.assertRaises(ValueError):
+            storage.query_results({"follow_decision OR 1=1 --": "not_follow"})
+
     def test_update_ai_extraction_syncs_columns_and_json(self):
         storage = self.make_storage()
         result_id = storage.save(BidInfo("项目A", "https://example.com/a", "2026-07-01", "源"))
@@ -172,3 +179,37 @@ class StorageResultsCenterTests(unittest.TestCase):
         self.assertEqual(bid.region, "上海")
         self.assertEqual(bid.submission_deadline, "2026-07-05 10:00")
         self.assertEqual(bid.ai_extracted_data["organization"], "上海某单位")
+
+    def test_update_ai_extraction_failed_status_persists_error_and_row(self):
+        storage = self.make_storage()
+        result_id = storage.save(BidInfo("项目A", "https://example.com/a", "2026-07-01", "源"))
+
+        storage.update_ai_extraction(
+            result_id,
+            "failed",
+            None,
+            None,
+            error="ai extraction timed out",
+        )
+
+        bid = storage.get_by_id(result_id)
+        self.assertIsNotNone(bid)
+        self.assertEqual(bid.ai_extract_status, "failed")
+        self.assertEqual(bid.ai_extract_error, "ai extraction timed out")
+        self.assertEqual(bid.ai_extracted_data, {})
+
+    def test_update_detail_fetch_failed_status_persists_error_and_row(self):
+        storage = self.make_storage()
+        result_id = storage.save(BidInfo("项目A", "https://example.com/a", "2026-07-01", "源"))
+
+        storage.update_detail_fetch(
+            result_id,
+            "failed",
+            error="detail fetch returned 500",
+        )
+
+        bid = storage.get_by_id(result_id)
+        self.assertIsNotNone(bid)
+        self.assertEqual(bid.detail_fetch_status, "failed")
+        self.assertEqual(bid.detail_fetch_error, "detail fetch returned 500")
+        self.assertEqual(bid.detail_text, "")

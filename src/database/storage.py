@@ -44,7 +44,45 @@ RESULT_CENTER_COLUMNS = {
     "ai_recommendation": "TEXT DEFAULT ''",
     "ai_extract_error": "TEXT DEFAULT ''",
     "detail_fetch_error": "TEXT DEFAULT ''",
+    # SQLite ALTER TABLE only accepts constant defaults, so migrations use an
+    # empty string here and the application sets updated_at on writes.
     "updated_at": "TEXT DEFAULT ''",
+}
+
+RESULT_QUERY_FILTERS = {
+    "id": "id",
+    "unique_id": "unique_id",
+    "title": "title",
+    "url": "url",
+    "publish_date": "publish_date",
+    "source": "source",
+    "purchaser": "purchaser",
+    "notified": "notified",
+    "fit_status": "fit_status",
+    "follow_decision": "follow_decision",
+    "urgency": "urgency",
+    "urgency_source": "urgency_source",
+    "project_stage": "project_stage",
+    "amount": "amount",
+    "amount_unit": "amount_unit",
+    "region": "region",
+    "category": "category",
+    "project_type": "project_type",
+    "nature": "nature",
+    "registration_deadline": "registration_deadline",
+    "submission_deadline": "submission_deadline",
+    "bid_opening_time": "bid_opening_time",
+    "deadline_source": "deadline_source",
+    "urgency_reference_time": "urgency_reference_time",
+    "urgency_reference_type": "urgency_reference_type",
+    "ai_extract_status": "ai_extract_status",
+    "detail_fetch_status": "detail_fetch_status",
+    "detail_fetched_at": "detail_fetched_at",
+    "review_notes": "review_notes",
+    "ai_recommendation": "ai_recommendation",
+    "ai_extract_error": "ai_extract_error",
+    "detail_fetch_error": "detail_fetch_error",
+    "updated_at": "updated_at",
 }
 
 
@@ -370,7 +408,10 @@ class Storage:
         params = []
 
         for key, value in filters.items():
-            where_parts.append(f"{key} = ?")
+            column = RESULT_QUERY_FILTERS.get(key)
+            if column is None:
+                raise ValueError(f"Unsupported query filter: {key}")
+            where_parts.append(f"{column} = ?")
             params.append(value)
 
         where_clause = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""

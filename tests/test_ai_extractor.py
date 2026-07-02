@@ -1,9 +1,12 @@
 import json
+import os
+import tempfile
 import unittest
 from datetime import datetime
 from unittest.mock import Mock, patch
 
-from src.results.ai_extractor import AIExtractor, build_column_updates, suggest_urgency
+from src.database.storage import BidInfo, Storage
+from src.results.ai_extractor import AIExtractor, build_column_updates, enrich_new_bid, suggest_urgency
 
 
 class AIExtractorTests(unittest.TestCase):
@@ -97,3 +100,42 @@ class AIExtractorTests(unittest.TestCase):
         with patch("src.results.ai_extractor.requests.post", return_value=response):
             with self.assertRaises(ValueError):
                 AIExtractor(config).extract("标题", "https://e.test", "源", "2026-07-01", "摘要", "详情")
+
+    def test_enrich_new_bid_preserves_manual_urgency(self):
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        storage = Storage(os.path.join(tmpdir.name, "bids.db"))
+        bid = BidInfo("上海智能化公开招标", "https://example.com/a", "2026-07-01", "源", "摘要")
+        result_id = storage.save(bid)
+        storage.update_review(
+            [result_id],
+            {
+                "urgency": "low",
+                "urgency_source": "manual",
+                "urgency_reference_time": "2026-07-20 17:00",
+                "urgency_reference_type": "registration",
+            },
+        )
+        ai_data = {
+            "region": "上海",
+            "deadlines": [
+                {"type": "submission_deadline", "end_at": "2026-07-04 10:00"},
+            ],
+        }
+
+        with patch("src.results.ai_extractor.fetch_detail_text", return_value=(True, "详情", None)):
+            with patch.object(AIExtractor, "extract", return_value=ai_data):
+                enrich_new_bid(
+                    storage,
+                    result_id,
+                    bid,
+                    {"enable": True, "api_key": "secret", "model": "grok"},
+                )
+
+        updated = storage.get_by_id(result_id)
+        self.assertEqual(updated.ai_extract_status, "extracted")
+        self.assertEqual(updated.region, "上海")
+        self.assertEqual(updated.urgency, "low")
+        self.assertEqual(updated.urgency_source, "manual")
+        self.assertEqual(updated.urgency_reference_time, "2026-07-20 17:00")
+        self.assertEqual(updated.urgency_reference_type, "registration")

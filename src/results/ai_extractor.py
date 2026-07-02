@@ -209,7 +209,9 @@ def enrich_new_bid(storage, result_id: int, bid, ai_config: dict | None, log_cal
             detail_text,
         )
         columns = build_column_updates(ai_data)
-        columns.update(suggest_urgency(ai_data))
+        current_bid = storage.get_by_id(result_id) if hasattr(storage, "get_by_id") else bid
+        if getattr(current_bid, "urgency_source", "") != "manual":
+            columns.update(suggest_urgency(ai_data))
         storage.update_ai_extraction(result_id, "extracted", ai_data, columns)
     except Exception as exc:
         log(f"[WARN] AI extraction failed for result {result_id}: {exc}")

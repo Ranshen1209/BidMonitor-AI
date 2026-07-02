@@ -11,8 +11,14 @@ import random
 import logging
 from abc import ABC, abstractmethod
 from typing import List, Optional, Dict, Any
-import requests
-from bs4 import BeautifulSoup
+try:
+    import requests
+except ImportError:  # pragma: no cover - exercised through import-time tests
+    requests = None
+try:
+    from bs4 import BeautifulSoup
+except ImportError:  # pragma: no cover - exercised through import-time tests
+    BeautifulSoup = None
 from dataclasses import dataclass
 
 # 导入存储模块的数据类
@@ -32,6 +38,11 @@ USER_AGENTS = [
 ]
 
 
+class _MissingRequestsSession:
+    def get(self, *args, **kwargs):
+        raise RuntimeError("requests is required for HTTP fetching. Install requirements.txt.")
+
+
 class BaseCrawler(ABC):
     """爬虫基类"""
     
@@ -45,6 +56,9 @@ class BaseCrawler(ABC):
         self.request_delay = config.get('request_delay', 5)
         self.max_retries = config.get('max_retries', 3)
         self.logger = logging.getLogger(f"crawler.{self.name}")
+        if requests is None:
+            self.session = _MissingRequestsSession()
+            return
         self.session = requests.Session()
     
     def _get_headers(self) -> Dict[str, str]:
@@ -79,6 +93,8 @@ class BaseCrawler(ABC):
         """
         import urllib3
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        if requests is None:
+            raise RuntimeError("requests is required for HTTP fetching. Install requirements.txt.")
         
         for attempt in range(self.max_retries):
             try:
@@ -130,6 +146,8 @@ class BaseCrawler(ABC):
     
     def parse_html(self, html: str) -> BeautifulSoup:
         """解析HTML内容"""
+        if BeautifulSoup is None:
+            raise RuntimeError("beautifulsoup4 is required for HTML parsing. Install requirements.txt.")
         return BeautifulSoup(html, 'lxml')
     
     @abstractmethod

@@ -5,6 +5,14 @@ import logging
 import threading
 from typing import Optional
 
+from .runtime_paths import (
+    configure_browser_binary_environment,
+    find_chromedriver_binary,
+    find_selenium_chrome_binary,
+)
+
+configure_browser_binary_environment()
+
 try:
     from selenium import webdriver
     from selenium.webdriver.chrome.service import Service
@@ -13,11 +21,16 @@ try:
     from selenium.webdriver.support.ui import WebDriverWait
     from selenium.webdriver.support import expected_conditions as EC
     from webdriver_manager.chrome import ChromeDriverManager
+    try:
+        from webdriver_manager.core.driver_cache import DriverCacheManager
+    except Exception:
+        DriverCacheManager = None
     SELENIUM_AVAILABLE = True
     IMPORT_ERROR_MSG = None
 except Exception as e:  # ImportError 及其它初始化异常
     SELENIUM_AVAILABLE = False
     IMPORT_ERROR_MSG = str(e)
+    DriverCacheManager = None
 
 from crawler.base import USER_AGENTS
 from .base_browser import BrowserCrawler
@@ -40,6 +53,9 @@ def _build_options(headless: bool) -> "Options":
     options = Options()
     if headless:
         options.add_argument("--headless=new")
+    chrome_binary = find_selenium_chrome_binary()
+    if chrome_binary is not None:
+        options.binary_location = str(chrome_binary)
     options.add_argument("--disable-blink-features=AutomationControlled")
     options.add_argument("--disable-extensions")
     options.add_argument("--no-sandbox")
@@ -63,11 +79,25 @@ def _create_driver(headless: bool, timeout: int):
     if not SELENIUM_AVAILABLE:
         return None
     options = _build_options(headless)
+    local_driver = find_chromedriver_binary()
+    if local_driver is not None:
+        try:
+            driver = webdriver.Chrome(service=Service(str(local_driver)), options=options)
+            driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {"source": _STEALTH_JS})
+            driver.set_page_load_timeout(timeout)
+            return driver
+        except Exception as e:
+            logging.warning(f"项目内 ChromeDriver 初始化失败,尝试系统/下载 fallback: {e}")
     try:
         driver = webdriver.Chrome(options=options)
     except Exception:
         try:
-            service = Service(ChromeDriverManager().install())
+            if DriverCacheManager is not None:
+                paths = configure_browser_binary_environment()
+                cache = DriverCacheManager(root_dir=str(paths.webdriver_manager))
+                service = Service(ChromeDriverManager(cache_manager=cache).install())
+            else:
+                service = Service(ChromeDriverManager().install())
             driver = webdriver.Chrome(service=service, options=options)
         except Exception as e:
             logging.error(f"Chrome 初始化失败: {e}")

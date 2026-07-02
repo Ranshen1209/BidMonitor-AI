@@ -38,7 +38,7 @@ server/
   1. 在Windows上运行 pack.bat，自动打包并上传到服务器
   2. 服务器上执行 ./server/setup.sh 完成部署
   3. 访问 http://服务器IP:8080
-  4. 输入用户名密码登录（默认: CDKJ / cdkj）
+  4. 输入用户名密码登录（默认: Admin / 123654）
 
 方式二：手动部署
   1. 上传代码到服务器 /opt/bidmonitor/
@@ -51,8 +51,8 @@ server/
 --------------------------------------------------------------------------------
 服务器端已启用 HTTP Basic 认证保护：
 
-  默认账号: CDKJ
-  默认密码: cdkj
+  默认账号: Admin
+  默认密码: 123654
 
 如需修改，编辑 server/app.py 中的 AUTH_USERNAME 和 AUTH_PASSWORD 变量。
 

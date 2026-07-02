@@ -2,7 +2,10 @@ FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    BIDMONITOR_BROWSER_BINARIES=/app/.browser-binaries \
+    CLOAKBROWSER_CACHE_DIR=/app/.browser-binaries/cloakbrowser \
+    PLAYWRIGHT_BROWSERS_PATH=/app/.browser-binaries/playwright
 
 WORKDIR /app
 
@@ -18,8 +21,11 @@ RUN apt-get update \
 COPY server/requirements.txt server/requirements.txt
 RUN pip install --no-cache-dir -r server/requirements.txt
 
-# 预下载 CloakBrowser 专用 Chromium(约200MB)并缓存进镜像层;失败不阻断构建
-RUN python -c "import cloakbrowser; b=cloakbrowser.launch(headless=True); b.close(); print('cloakbrowser binary ready')" || true
+COPY .browser-binaries .browser-binaries
+RUN mkdir -p .browser-binaries/cloakbrowser .browser-binaries/playwright .browser-binaries/selenium .browser-binaries/webdriver-manager
+
+# 预下载 CloakBrowser 专用 Chromium(约200MB)到项目内缓存;失败不阻断构建
+RUN python -m cloakbrowser install || true
 
 COPY src src
 COPY server server

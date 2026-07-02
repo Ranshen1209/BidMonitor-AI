@@ -52,14 +52,18 @@ class BrowserCrawler(ABC):
 
     def parse(self, html: str) -> List[BidInfo]:
         """从页面提取 <a> 链接为 BidInfo(唯一实现,两后端共用)。"""
-        from bs4 import BeautifulSoup
-        soup = BeautifulSoup(html, "lxml")
+        try:
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(html, "lxml")
+        except ImportError:  # pragma: no cover - exercised in minimal test envs
+            from crawler.url_list import _MiniSoup
+            soup = _MiniSoup(html)
         bids: List[BidInfo] = []
         today = datetime.now().strftime("%Y-%m-%d")
         seen = set()
         for a in soup.find_all("a", href=True):
             text = a.get_text(strip=True)
-            href = a["href"]
+            href = a.get("href", "")
             if not text or len(text) < 4:
                 continue
             if href.lower().startswith(("javascript:", "#", "mailto:", "tel:")):

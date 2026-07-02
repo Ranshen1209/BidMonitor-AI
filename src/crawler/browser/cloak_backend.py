@@ -4,6 +4,10 @@ import logging
 import threading
 from typing import Optional
 
+from .runtime_paths import configure_browser_binary_environment
+
+configure_browser_binary_environment()
+
 try:
     from cloakbrowser import launch as _cloak_launch
     CLOAK_AVAILABLE = True

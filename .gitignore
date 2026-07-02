@@ -26,12 +26,21 @@ data/
 # 日志文件
 *.log
 output_log.txt
+logs/
 
 # Selenium / ChromeDriver
 chromedriver.exe
 chromedriver
 geckodriver.exe
 chromedriver*.zip
+
+# Browser binaries live locally and can be copied into Docker, but should not bloat git
+.browser-binaries/*
+!.browser-binaries/.gitkeep
+!.browser-binaries/README.md
+
+# Local agent worktrees/cache
+.claude/
 
 # 打包文件和发布包
 build_temp/

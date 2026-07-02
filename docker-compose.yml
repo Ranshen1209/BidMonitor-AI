@@ -1,0 +1,16 @@
+services:
+  bidmonitor:
+    build: .
+    container_name: bidmonitor-ai
+    ports:
+      - "8080:8080"
+    environment:
+      BIDMONITOR_ADMIN_USER: "${BIDMONITOR_ADMIN_USER:-Admin}"
+      BIDMONITOR_ADMIN_PASSWORD: "${BIDMONITOR_ADMIN_PASSWORD:-123654}"
+      BIDMONITOR_COOKIE_SECURE: "${BIDMONITOR_COOKIE_SECURE:-false}"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./server/server_config.json:/app/server/server_config.json
+      - /Users/cervine/Documents/Rule-Project/projects/opportunity-collection/output/materials:/materials:ro
+    restart: unless-stopped

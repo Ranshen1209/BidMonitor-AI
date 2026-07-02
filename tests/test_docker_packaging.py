@@ -33,9 +33,22 @@ class DockerPackagingTests(unittest.TestCase):
         dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
         for pkg in ["libnss3", "libgbm1", "libasound2", "libatk1.0-0", "fonts-liberation"]:
             self.assertIn(pkg, dockerfile)
+        self.assertIn("BIDMONITOR_BROWSER_BINARIES=/app/.browser-binaries", dockerfile)
+        self.assertIn("CLOAKBROWSER_CACHE_DIR=/app/.browser-binaries/cloakbrowser", dockerfile)
+        self.assertIn("PLAYWRIGHT_BROWSERS_PATH=/app/.browser-binaries/playwright", dockerfile)
+        self.assertIn("COPY .browser-binaries .browser-binaries", dockerfile)
         # build 阶段预下载 CloakBrowser 二进制(失败不阻断)
-        self.assertIn("cloakbrowser", dockerfile)
+        self.assertIn("python -m cloakbrowser install", dockerfile)
         self.assertIn("|| true", dockerfile)
+
+    def test_browser_binary_directory_is_git_ignored_but_sent_to_docker(self):
+        gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
+        dockerignore = (ROOT / ".dockerignore").read_text(encoding="utf-8")
+
+        self.assertIn(".browser-binaries/*", gitignore)
+        self.assertIn("!.browser-binaries/.gitkeep", gitignore)
+        self.assertIn("!.browser-binaries/README.md", gitignore)
+        self.assertNotIn(".browser-binaries", dockerignore)
 
 
 if __name__ == "__main__":

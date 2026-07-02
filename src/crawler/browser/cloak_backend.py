@@ -33,14 +33,25 @@ def _build_launch_kwargs(config: dict, headless: bool) -> dict:
 class CloakBrowserManager:
     """共享 CloakBrowser(Playwright Browser)实例。"""
     _browser = None
+    _owner_thread = None
     _lock = threading.Lock()
 
     @classmethod
     def get_browser(cls, config: dict, headless: bool = True):
         with cls._lock:
+            current = threading.get_ident()
+            if cls._browser is not None and cls._owner_thread != current:
+                # Playwright sync API is thread-affinity bound — recreate on thread change
+                try:
+                    cls._browser.close()
+                except Exception:
+                    pass
+                cls._browser = None
+                cls._owner_thread = None
             if cls._browser is None and CLOAK_AVAILABLE:
                 try:
                     cls._browser = _cloak_launch(**_build_launch_kwargs(config, headless))
+                    cls._owner_thread = current
                 except Exception as e:
                     logging.error(f"CloakBrowser 启动失败: {e}")
                     cls._browser = None
@@ -54,6 +65,7 @@ class CloakBrowserManager:
             except Exception:
                 pass
             cls._browser = None
+            cls._owner_thread = None
 
 
 class CloakBrowserCrawler(BrowserCrawler):

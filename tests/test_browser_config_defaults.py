@@ -1,4 +1,5 @@
-import os, sys, unittest
+import os, sys, threading, unittest
+from unittest.mock import MagicMock, patch
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(ROOT, "src")
 if SRC not in sys.path:
@@ -35,6 +36,47 @@ class CloakLaunchKwargsTests(unittest.TestCase):
         self.assertNotIn("proxy", kw)
         self.assertNotIn("license_key", kw)
         self.assertNotIn("timezone", kw)
+
+
+class CloakBrowserManagerThreadTests(unittest.TestCase):
+    def tearDown(self):
+        # Reset shared class state so tests do not bleed into each other
+        cb.CloakBrowserManager._browser = None
+        cb.CloakBrowserManager._owner_thread = None
+
+    def test_manager_recreates_browser_on_thread_change(self):
+        browser1 = MagicMock()
+        browser2 = MagicMock()
+        side_effects = [browser1, browser2]
+
+        def _factory(**kwargs):
+            return side_effects.pop(0)
+
+        with patch.object(cb, "CLOAK_AVAILABLE", True), \
+             patch.object(cb, "_cloak_launch", side_effect=_factory):
+            # First call — browser created on current thread
+            result1 = cb.CloakBrowserManager.get_browser({})
+            self.assertIs(result1, browser1)
+
+            # Simulate a thread change by spoofing _owner_thread
+            cb.CloakBrowserManager._owner_thread = threading.get_ident() + 1
+
+            # Second call — should close browser1 and recreate
+            result2 = cb.CloakBrowserManager.get_browser({})
+            self.assertIs(result2, browser2)
+            self.assertIsNot(result2, browser1)
+            browser1.close.assert_called_once()
+
+    def test_manager_reuses_browser_same_thread(self):
+        browser1 = MagicMock()
+        launch_mock = MagicMock(return_value=browser1)
+
+        with patch.object(cb, "CLOAK_AVAILABLE", True), \
+             patch.object(cb, "_cloak_launch", launch_mock):
+            result1 = cb.CloakBrowserManager.get_browser({})
+            result2 = cb.CloakBrowserManager.get_browser({})
+            self.assertIs(result1, result2)
+            launch_mock.assert_called_once()
 
 
 if __name__ == "__main__":

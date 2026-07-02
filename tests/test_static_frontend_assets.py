@@ -309,6 +309,25 @@ class StaticFrontendAssetsTests(unittest.TestCase):
         self.assertIn("detail.deadlines", js)
         self.assertIn(".detail-field-comparison", css)
 
+    def test_detail_panel_reads_array_shaped_ai_deadlines_by_type(self):
+        js = self.read("app.js")
+
+        self.assertIn("Array.isArray(deadlines)", js)
+        self.assertRegex(
+            js,
+            r"registration_deadline[\s\S]*registration[\s\S]*document_deadline[\s\S]*file_deadline",
+        )
+        self.assertRegex(
+            js,
+            r"submission_deadline[\s\S]*submission[\s\S]*bid_submission_deadline",
+        )
+        self.assertRegex(
+            js,
+            r"bid_opening_time[\s\S]*bid_opening[\s\S]*opening_time",
+        )
+        self.assertRegex(js, r"\.type\s*===\s*deadlineType")
+        self.assertRegex(js, r"\.end_at\s*\|\|\s*[^;]+\.start_at\s*\|\|\s*[^;]+\.raw_text")
+
     def test_manual_field_save_only_patches_changed_manual_overrides(self):
         js = self.read("app.js")
 

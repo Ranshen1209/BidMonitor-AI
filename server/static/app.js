@@ -384,12 +384,26 @@ function detailResolvedValue(detail, key) {
     return resolved[key] || detail[key] || '';
 }
 
+function detailAiDeadlineValue(deadlines, deadlineTypes, fallbackKeys) {
+    if (Array.isArray(deadlines)) {
+        for (const deadlineType of deadlineTypes) {
+            const item = deadlines.find(deadline => deadline && deadline.type === deadlineType);
+            if (item) return item.end_at || item.start_at || item.raw_text || '';
+        }
+        return '';
+    }
+    for (const key of fallbackKeys) {
+        if (deadlines[key]) return deadlines[key];
+    }
+    return '';
+}
+
 function detailAiOriginalValue(detail, key) {
     const ai = detail.ai_extracted_data || {};
     const deadlines = ai.deadlines || detail.deadlines || {};
-    if (key === 'registration_deadline') return deadlines.registration || deadlines.registration_deadline || '';
-    if (key === 'submission_deadline') return deadlines.submission || deadlines.submission_deadline || '';
-    if (key === 'bid_opening_time') return deadlines.bid_opening || deadlines.bid_opening_time || '';
+    if (key === 'registration_deadline') return detailAiDeadlineValue(deadlines, ['registration_deadline', 'registration', 'document_deadline', 'file_deadline'], ['registration', 'registration_deadline']);
+    if (key === 'submission_deadline') return detailAiDeadlineValue(deadlines, ['submission_deadline', 'submission', 'bid_submission_deadline'], ['submission', 'submission_deadline']);
+    if (key === 'bid_opening_time') return detailAiDeadlineValue(deadlines, ['bid_opening_time', 'bid_opening', 'opening_time'], ['bid_opening', 'bid_opening_time']);
     return ai[key] || '';
 }
 

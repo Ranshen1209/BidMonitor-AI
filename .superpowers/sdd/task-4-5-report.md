@@ -45,3 +45,17 @@ Changes:
 - Detail panel now renders core fields side by side as 字段 / AI原始值 / 人工修正值 / 最终值.
 - Manual correction inputs initialize from `detail.manual_overrides`; `saveResultFields()` PATCHes only changed manual fields and alerts without an API call when unchanged.
 - Bulk review now has an explicit `bulkApplyReasons` checkbox, allowing `non_follow_reasons: []` to clear reasons while still requiring a reason when setting 不跟进.
+
+## Task 4/5 Frontend Fix Addendum - array deadline AI original values
+
+Status: completed
+
+RED evidence:
+- `python3 -m unittest tests.test_static_frontend_assets -v` -> FAIL, 23 tests run, 1 failure: missing `Array.isArray(deadlines)` handling for detail AI deadline originals.
+
+GREEN evidence:
+- `python3 -m unittest tests.test_static_frontend_assets -v` -> PASS, 23 tests.
+
+Changes:
+- `detailAiOriginalValue()` now supports array-shaped `ai_extracted_data.deadlines` items by deadline `type`, reading `end_at || start_at || raw_text`.
+- Existing object-map deadline support remains as fallback.

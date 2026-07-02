@@ -46,7 +46,8 @@ python app.py
 ### 2. 多网站支持
 - 政府采购网、中国招标网、中国能建、国家电网...
 - 支持自定义网站配置
-- Selenium 模式绕过反爬虫
+- 浏览器模式绕过反爬：CloakBrowser 隐身优先，Selenium 兜底，requests 最终兜底
+- CloakBrowser 内置指纹补丁 + 拟人行为（humanize），Docker 镜像已预打包专用 Chromium
 
 ### 3. 通知方式
 - 📧 邮件通知（支持多邮箱）

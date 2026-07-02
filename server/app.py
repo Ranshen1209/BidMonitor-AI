@@ -324,7 +324,9 @@ def normalize_config(config: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(config.get('non_follow_reason_tags'), list):
         config['non_follow_reason_tags'] = DEFAULT_NON_FOLLOW_REASON_TAGS.copy()
     ai_config = config.setdefault('ai_config', {})
-    ai_config.setdefault('endpoint_type', 'responses')
+    if not ai_config.get('endpoint_type'):
+        base_url = (ai_config.get('base_url') or '').rstrip('/').lower()
+        ai_config['endpoint_type'] = 'chat_completions' if base_url.endswith('/chat/completions') else 'responses'
     for source in config.get('csv_url_sources', []):
         source.setdefault('domain_delay', 2)
         source.setdefault('auth_cookies', [])
@@ -1252,14 +1254,20 @@ async def get_results(
         if value not in (None, ""):
             filters[key] = value
 
-    try:
-        bids, total = app_state.storage.query_results(filters, limit, offset)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
     if search_query not in (None, ""):
-        bids = [bid for bid in bids if _matches_result_query(bid, search_query)]
-        total = len(bids)
+        try:
+            _bids, candidate_total = app_state.storage.query_results(filters, 0, 0)
+            candidates, _total = app_state.storage.query_results(filters, candidate_total, 0) if candidate_total else ([], 0)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        matched = [bid for bid in candidates if _matches_result_query(bid, search_query)]
+        total = len(matched)
+        bids = matched[offset: offset + limit]
+    else:
+        try:
+            bids, total = app_state.storage.query_results(filters, limit, offset)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
 
     return {
         "total": total,
@@ -1300,6 +1308,9 @@ async def bulk_update_result_review(payload: Dict[str, Any], user: Dict[str, Any
         update = validate_review_update(update_payload, _review_reason_tags())
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    missing_ids = [result_id for result_id in result_ids if not app_state.storage.get_by_id(result_id)]
+    if missing_ids:
+        raise HTTPException(status_code=404, detail=f"results not found: {', '.join(str(result_id) for result_id in missing_ids)}")
     app_state.storage.update_review(result_ids, update)
     return {"success": True, "updated": len(result_ids)}
 
@@ -1362,7 +1373,8 @@ async def clear_history(user: Dict[str, Any] = Depends(require_admin)):
 @app.get("/api/contacts")
 async def get_contacts(user: Dict[str, Any] = Depends(get_current_user)):
     """获取联系人列表"""
-    return app_state.config.get('contacts', [])
+    contacts = copy.deepcopy(app_state.config.get('contacts', []))
+    return _mask_config_secrets(contacts)
 
 @app.post("/api/contacts")
 async def update_contacts(contacts: List[Dict[str, Any]], user: Dict[str, Any] = Depends(get_current_user)):
@@ -1541,7 +1553,11 @@ async def test_ai(user: Dict[str, Any] = Depends(get_current_user)):
                 "base_url": ai_config.get("base_url", "https://api.deepseek.com/chat/completions"),
                 "api_key": ai_config["api_key"],
                 "model": ai_config.get("model", "deepseek-chat"),
-                "endpoint_type": ai_config.get("endpoint_type", "responses"),
+                "endpoint_type": ai_config.get("endpoint_type") or (
+                    "chat_completions"
+                    if (ai_config.get("base_url") or "").rstrip("/").lower().endswith("/chat/completions")
+                    else "responses"
+                ),
             }
         )
         test_result = extractor.test_connection("Reply with exactly: ok")

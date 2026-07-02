@@ -170,6 +170,41 @@ class ServerConfigDefaultsTests(unittest.TestCase):
         self.assertEqual(app.app_state.config["wechat_config"]["token"], "wechat-secret")
         self.assertEqual(app.app_state.config["contacts"][0]["wechat_token"], "contact-wechat-secret")
 
+    def test_get_contacts_masks_secret_bearing_values_without_mutating_config(self):
+        app.app_state.config = app.normalize_config(
+            {
+                "contacts": [
+                    {
+                        "name": "Alice",
+                        "email": "alice@example.com",
+                        "email_password": "contact-email-secret",
+                        "wechat_token": "contact-wechat-secret",
+                    }
+                ],
+            }
+        )
+
+        contacts = asyncio.run(app.get_contacts(user={"role": "user"}))
+
+        self.assertEqual(contacts[0]["email_password"], "***")
+        self.assertEqual(contacts[0]["wechat_token"], "***")
+        self.assertEqual(contacts[0]["name"], "Alice")
+        self.assertEqual(app.app_state.config["contacts"][0]["email_password"], "contact-email-secret")
+        self.assertEqual(app.app_state.config["contacts"][0]["wechat_token"], "contact-wechat-secret")
+
+    def test_normalize_config_infers_chat_endpoint_type_for_legacy_chat_base_url(self):
+        config = app.normalize_config(
+            {
+                "ai_config": {
+                    "base_url": "https://api.deepseek.com/chat/completions",
+                    "api_key": "secret",
+                    "model": "deepseek-chat",
+                }
+            }
+        )
+
+        self.assertEqual(config["ai_config"]["endpoint_type"], "chat_completions")
+
     def test_update_full_config_preserves_masked_secrets(self):
         app.app_state.config = app.normalize_config(
             {

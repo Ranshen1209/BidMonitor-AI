@@ -90,6 +90,29 @@ class ServerResultsApiTests(unittest.TestCase):
         self.assertEqual(result["total"], 1)
         self.assertEqual([item["id"] for item in result["items"]], [7])
 
+    def test_get_results_q_matches_outside_first_page_before_pagination(self):
+        non_matching = self.make_bid()
+        non_matching.id = 8
+        non_matching.title = "市政项目B"
+        non_matching.category = "市政工程"
+        non_matching.ai_extracted_data = {"organization": "市政单位", "deadlines": []}
+        non_matching.manual_overrides = {"organization": "人工市政单位"}
+        matching = self.make_bid()
+        matching.id = 9
+        matching.title = "智能化项目C"
+
+        def query_results(_filters, limit, offset):
+            if limit == 1 and offset == 0:
+                return [non_matching], 2
+            return [non_matching, matching], 2
+
+        self.storage.query_results.side_effect = query_results
+
+        result = asyncio.run(app.get_results(limit=1, offset=0, q="智能化", user={"role": "user"}))
+
+        self.assertEqual(result["total"], 1)
+        self.assertEqual([item["id"] for item in result["items"]], [9])
+
     def test_get_result_detail_returns_ai_manual_and_resolved_data(self):
         bid = self.make_bid()
         self.storage.get_by_id.return_value = bid
@@ -139,6 +162,22 @@ class ServerResultsApiTests(unittest.TestCase):
                     user={"role": "user"},
                 )
             )
+        self.storage.update_review.assert_not_called()
+
+    def test_bulk_review_rejects_missing_ids_atomically(self):
+        existing = self.make_bid()
+        existing.id = 7
+        self.storage.get_by_id.side_effect = [existing, None]
+
+        with self.assertRaises(app.HTTPException) as ctx:
+            asyncio.run(
+                app.bulk_update_result_review(
+                    {"ids": [7, 8], "update": {"urgency": "urgent"}},
+                    user={"role": "user"},
+                )
+            )
+
+        self.assertEqual(ctx.exception.status_code, 404)
         self.storage.update_review.assert_not_called()
 
     def test_update_manual_fields_saves_overrides(self):

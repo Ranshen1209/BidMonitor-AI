@@ -55,6 +55,42 @@ class AIExtractorTests(unittest.TestCase):
         self.assertEqual(post.call_args[0][0], "https://api.example.com/v1/chat/completions")
         self.assertIn("messages", post.call_args.kwargs["json"])
 
+    def test_test_connection_uses_responses_endpoint(self):
+        config = {
+            "enable": True,
+            "base_url": "https://api.example.com/v1",
+            "api_key": "secret",
+            "model": "grok-4.20-fast",
+            "endpoint_type": "responses",
+        }
+        response = Mock()
+        response.json.return_value = {"output_text": "ok"}
+
+        with patch("src.results.ai_extractor.requests.post", return_value=response) as post:
+            result = AIExtractor(config).test_connection("Reply ok")
+
+        self.assertEqual(result, "ok")
+        self.assertEqual(post.call_args[0][0], "https://api.example.com/v1/responses")
+        self.assertIn("input", post.call_args.kwargs["json"])
+
+    def test_test_connection_uses_chat_completions_endpoint(self):
+        config = {
+            "enable": True,
+            "base_url": "https://api.example.com/v1/chat/completions",
+            "api_key": "secret",
+            "model": "deepseek-chat",
+            "endpoint_type": "chat_completions",
+        }
+        response = Mock()
+        response.json.return_value = {"choices": [{"message": {"content": "ok"}}]}
+
+        with patch("src.results.ai_extractor.requests.post", return_value=response) as post:
+            result = AIExtractor(config).test_connection("Reply ok")
+
+        self.assertEqual(result, "ok")
+        self.assertEqual(post.call_args[0][0], "https://api.example.com/v1/chat/completions")
+        self.assertIn("messages", post.call_args.kwargs["json"])
+
     def test_build_column_updates_extracts_three_deadline_columns(self):
         data = {
             "amount": "50",
@@ -76,6 +112,22 @@ class AIExtractorTests(unittest.TestCase):
         self.assertEqual(columns["submission_deadline"], "2026-07-05 10:00")
         self.assertEqual(columns["bid_opening_time"], "2026-07-05 10:30")
         self.assertEqual(columns["deadline_source"], "ai")
+
+    def test_build_column_updates_serializes_structured_recommendation(self):
+        columns = build_column_updates(
+            {
+                "ai_recommendation": {
+                    "decision": "follow",
+                    "reasons": ["上海项目", "智能化"],
+                },
+                "deadlines": [],
+            }
+        )
+
+        self.assertEqual(
+            columns["ai_recommendation"],
+            json.dumps({"decision": "follow", "reasons": ["上海项目", "智能化"]}, ensure_ascii=False),
+        )
 
     def test_suggest_urgency_uses_submission_deadline_first(self):
         data = {
@@ -139,3 +191,24 @@ class AIExtractorTests(unittest.TestCase):
         self.assertEqual(updated.urgency_source, "manual")
         self.assertEqual(updated.urgency_reference_time, "2026-07-20 17:00")
         self.assertEqual(updated.urgency_reference_type, "registration")
+
+    def test_enrich_new_bid_marks_ai_status_when_detail_fetch_fails(self):
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        storage = Storage(os.path.join(tmpdir.name, "bids.db"))
+        bid = BidInfo("上海智能化公开招标", "https://example.com/a", "2026-07-01", "源", "摘要")
+        result_id = storage.save(bid)
+
+        with patch("src.results.ai_extractor.fetch_detail_text", return_value=(False, "", "detail timeout")):
+            enrich_new_bid(
+                storage,
+                result_id,
+                bid,
+                {"enable": True, "api_key": "secret", "model": "grok"},
+            )
+
+        updated = storage.get_by_id(result_id)
+        self.assertIsNotNone(updated)
+        self.assertEqual(updated.detail_fetch_status, "failed")
+        self.assertEqual(updated.ai_extract_status, "detail_fetch_failed")
+        self.assertEqual(updated.ai_extract_error, "detail timeout")

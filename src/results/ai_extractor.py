@@ -107,12 +107,48 @@ class AIExtractor:
             text = body.get("output_text", "")
         return self._parse_json_text(text)
 
+    def test_connection(self, prompt: str = "Reply with exactly: ok") -> str:
+        if not hasattr(requests, "post"):
+            raise RuntimeError("requests is not installed")
+        endpoint_type = self.config.get("endpoint_type") or "responses"
+        endpoint_url = self._endpoint_url()
+        headers = {
+            "Authorization": f"Bearer {self.config.get('api_key', '')}",
+            "Content-Type": "application/json",
+        }
+        if endpoint_type == "chat_completions":
+            payload = {
+                "model": self.config.get("model"),
+                "messages": [
+                    {"role": "system", "content": "Reply concisely to confirm connectivity."},
+                    {"role": "user", "content": prompt},
+                ],
+            }
+        else:
+            payload = {
+                "model": self.config.get("model"),
+                "input": prompt,
+            }
+
+        response = requests.post(endpoint_url, headers=headers, json=payload, timeout=120)
+        response.raise_for_status()
+        body = response.json()
+        if endpoint_type == "chat_completions":
+            text = (((body.get("choices") or [{}])[0]).get("message") or {}).get("content", "")
+        else:
+            text = body.get("output_text", "")
+        return str(text).strip()
+
 
 def build_column_updates(ai_data: dict) -> dict:
     columns = {}
     for key in ["amount", "amount_unit", "region", "category", "project_type", "nature", "ai_recommendation"]:
         value = (ai_data or {}).get(key)
         if value:
+            if key == "ai_recommendation" and isinstance(value, (dict, list)):
+                value = json.dumps(value, ensure_ascii=False)
+            elif key == "ai_recommendation" and not isinstance(value, str):
+                value = str(value)
             columns[key] = value
 
     deadlines = (ai_data or {}).get("deadlines") or []
@@ -190,6 +226,13 @@ def enrich_new_bid(storage, result_id: int, bid, ai_config: dict | None, log_cal
     ok, detail_text, detail_error = fetch_detail_text(bid.url)
     if not ok:
         storage.update_detail_fetch(result_id, "failed", error=detail_error)
+        storage.update_ai_extraction(
+            result_id,
+            "detail_fetch_failed",
+            None,
+            None,
+            error=(detail_error or "")[:200],
+        )
         return
 
     storage.update_detail_fetch(result_id, "success", detail_text=detail_text)

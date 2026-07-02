@@ -15,6 +15,11 @@ Pillow>=9.0.0              # 图像处理，用于GUI图标
 # === 开发测试 ===
 pytest>=7.4.0              # 单元测试框架
 
+# === 浏览器模式抓取(反爬) ===
+selenium>=4.15.0
+webdriver-manager>=4.0.0
+cloakbrowser                # CloakBrowser 隐身浏览器(反爬首选)
+
 # === 云服务通知（按需安装）===
 # 阿里云短信/语音: pip install alibabacloud-dysmsapi20170525 alibabacloud-dyvmsapi20170525
 # 腾讯云短信: pip install tencentcloud-sdk-python-sms

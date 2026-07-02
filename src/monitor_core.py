@@ -175,9 +175,12 @@ class MonitorCore:
                 crawler_config[key] = self.crawler_overrides[key]
         self.config['crawler'] = crawler_config
 
-        for key in ['custom_sites', 'csv_url_sources']:
-            if key in self.crawler_overrides:
-                self.config[key] = self.crawler_overrides[key]
+        if 'enable_custom_sites' in self.crawler_overrides:
+            self.config['enable_custom_sites'] = self.crawler_overrides['enable_custom_sites']
+        if self.config.get('enable_custom_sites', False) and 'custom_sites' in self.crawler_overrides:
+            self.config['custom_sites'] = self.crawler_overrides['custom_sites']
+        if 'csv_url_sources' in self.crawler_overrides:
+            self.config['csv_url_sources'] = self.crawler_overrides['csv_url_sources']
     
     def clear_data(self):
         """清空所有历史数据"""
@@ -252,7 +255,7 @@ class MonitorCore:
                     self.log(f"[WARN] Failed to load site {site['name']}: {e}")
         
         # 3. 加载用户自定义爬虫
-        custom_sites = self.config.get('custom_sites', [])
+        custom_sites = self.config.get('custom_sites', []) if self.config.get('enable_custom_sites', False) else []
         for site in custom_sites:
             try:
                 name = site.get('name', 'Unknown')

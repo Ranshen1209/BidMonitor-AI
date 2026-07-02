@@ -36,6 +36,7 @@ class BrowserModeWiringTests(unittest.TestCase):
                     crawler_overrides={
                         "enabled_sites": [],
                         "use_selenium": True,
+                        "enable_custom_sites": True,
                         "custom_sites": custom_sites,
                     },
                 )
@@ -63,6 +64,7 @@ class BrowserModeWiringTests(unittest.TestCase):
                     crawler_overrides={
                         "enabled_sites": [],
                         "use_selenium": True,
+                        "enable_custom_sites": True,
                         "custom_sites": custom_sites,
                     },
                 )
@@ -132,6 +134,7 @@ class BrowserModeWiringTests(unittest.TestCase):
                     crawler_overrides={
                         "enabled_sites": [],
                         "use_selenium": False,
+                        "enable_custom_sites": True,
                         "custom_sites": custom_sites,
                     },
                 )
@@ -139,6 +142,25 @@ class BrowserModeWiringTests(unittest.TestCase):
         mock_factory.assert_not_called()
         self.assertEqual(len(monitor.crawlers), 1)
         self.assertIsInstance(monitor.crawlers[0], CustomCrawler)
+
+    def test_custom_sites_ignored_without_compatibility_flag(self):
+        """Web-stage overrides should not create custom-site crawlers by default."""
+        custom_sites = [{"name": "IgnoredSite", "url": "https://ignored.example.com"}]
+
+        with patch.object(mc, "get_default_sites", return_value={}):
+            with patch.object(mc, "create_browser_crawler") as mock_factory:
+                monitor = MonitorCore(
+                    keywords=["test"],
+                    notify_method="none",
+                    crawler_overrides={
+                        "enabled_sites": [],
+                        "use_selenium": True,
+                        "custom_sites": custom_sites,
+                    },
+                )
+
+        mock_factory.assert_not_called()
+        self.assertEqual(monitor.crawlers, [])
 
 
 if __name__ == "__main__":

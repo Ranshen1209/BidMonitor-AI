@@ -41,6 +41,7 @@ chromedriver*.zip
 
 # Local agent worktrees/cache
 .claude/
+.worktrees/
 
 # 打包文件和发布包
 build_temp/

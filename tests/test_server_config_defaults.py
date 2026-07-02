@@ -105,6 +105,80 @@ class ServerConfigDefaultsTests(unittest.TestCase):
 
         self.assertEqual(config["ai_config"]["api_key"], "***")
 
+    def test_get_config_masks_all_secret_bearing_values(self):
+        app.app_state.config = app.normalize_config(
+            {
+                "sms_config": {
+                    "provider": "aliyun",
+                    "access_key_id": "sms-id",
+                    "access_key_secret": "sms-secret",
+                },
+                "voice_config": {
+                    "provider": "aliyun",
+                    "access_key_id": "voice-id",
+                    "access_key_secret": "voice-secret",
+                },
+                "ai_config": {
+                    "api_key": "ai-secret",
+                    "endpoint_type": "responses",
+                },
+            }
+        )
+
+        config = asyncio.run(app.get_config(user={"role": "user"}))
+
+        self.assertEqual(config["sms_config"]["access_key_secret"], "***")
+        self.assertEqual(config["voice_config"]["access_key_secret"], "***")
+        self.assertEqual(config["ai_config"]["api_key"], "***")
+
+    def test_update_full_config_preserves_masked_secrets(self):
+        app.app_state.config = app.normalize_config(
+            {
+                "sms_config": {
+                    "provider": "aliyun",
+                    "access_key_id": "sms-id",
+                    "access_key_secret": "sms-secret",
+                },
+                "voice_config": {
+                    "provider": "aliyun",
+                    "access_key_id": "voice-id",
+                    "access_key_secret": "voice-secret",
+                },
+                "ai_config": {
+                    "api_key": "ai-secret",
+                    "endpoint_type": "responses",
+                },
+            }
+        )
+
+        payload = app.normalize_config(
+            {
+                "sms_config": {
+                    "provider": "aliyun",
+                    "access_key_id": "sms-id",
+                    "access_key_secret": "***",
+                },
+                "voice_config": {
+                    "provider": "aliyun",
+                    "access_key_id": "voice-id",
+                    "access_key_secret": "",
+                },
+                "ai_config": {
+                    "api_key": "***",
+                    "endpoint_type": "responses",
+                },
+            }
+        )
+
+        with patch.object(app, "save_config") as save_config:
+            result = asyncio.run(app.update_full_config(payload, user={"role": "user"}))
+
+        self.assertTrue(result["success"])
+        self.assertEqual(app.app_state.config["sms_config"]["access_key_secret"], "sms-secret")
+        self.assertEqual(app.app_state.config["voice_config"]["access_key_secret"], "voice-secret")
+        self.assertEqual(app.app_state.config["ai_config"]["api_key"], "ai-secret")
+        save_config.assert_called_once_with(app.app_state.config)
+
     def test_get_sites_merges_metadata_and_returns_full_shape(self):
         app.app_state.config = {
             "enabled_sites": ["url_list_001"],

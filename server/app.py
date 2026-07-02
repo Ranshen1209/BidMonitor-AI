@@ -1014,10 +1014,7 @@ async def run_once(background_tasks: BackgroundTasks, user: Dict[str, Any] = Dep
 async def get_config(user: Dict[str, Any] = Depends(get_current_user)):
     """获取配置"""
     config = copy.deepcopy(app_state.config)
-    ai_config = config.get("ai_config")
-    if isinstance(ai_config, dict) and ai_config.get("api_key"):
-        ai_config["api_key"] = "***"
-    return config
+    return _mask_config_secrets(config)
 
 @app.post("/api/config")
 async def update_config(config: ConfigModel, user: Dict[str, Any] = Depends(get_current_user)):
@@ -1123,6 +1120,78 @@ def _review_reason_tags() -> List[str]:
     return DEFAULT_NON_FOLLOW_REASON_TAGS.copy()
 
 
+CONFIG_SECRET_FIELDS = {
+    ("sms_config", "access_key_secret"),
+    ("voice_config", "access_key_secret"),
+    ("ai_config", "api_key"),
+}
+
+RESULT_OVERRIDE_FIELDS = {
+    "organization",
+    "amount",
+    "amount_unit",
+    "region",
+    "category",
+    "project_type",
+    "nature",
+    "registration_deadline",
+    "submission_deadline",
+    "bid_opening_time",
+    "deadlines",
+}
+
+
+def _mask_config_secrets(config: Dict[str, Any]) -> Dict[str, Any]:
+    for section, secret_key in CONFIG_SECRET_FIELDS:
+        section_value = config.get(section)
+        if isinstance(section_value, dict) and section_value.get(secret_key):
+            section_value[secret_key] = "***"
+    return config
+
+
+def _normalize_search_text(value: Any) -> str:
+    if value in (None, "", []):
+        return ""
+    if isinstance(value, list):
+        return " ".join(_normalize_search_text(item) for item in value if item not in (None, "", []))
+    if isinstance(value, dict):
+        return " ".join(_normalize_search_text(item) for item in value.values() if item not in (None, "", []))
+    return str(value)
+
+
+def _matches_result_query(bid: BidInfo, query: str) -> bool:
+    needle = (query or "").strip().lower()
+    if not needle:
+        return True
+    resolved = resolve_result_data(bid)
+    haystack = " ".join(
+        _normalize_search_text(value)
+        for value in [
+            bid.title,
+            bid.source,
+            bid.publish_date,
+            bid.purchaser,
+            bid.content,
+            bid.detail_text,
+            resolved,
+            bid.ai_extracted_data,
+            bid.manual_overrides,
+            bid.non_follow_reasons,
+            bid.review_notes,
+        ]
+    ).lower()
+    return needle in haystack
+
+
+def _validate_manual_override_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(payload, dict) or not payload:
+        raise HTTPException(status_code=400, detail="fields required")
+    unknown = sorted(set(payload) - RESULT_OVERRIDE_FIELDS)
+    if unknown:
+        raise HTTPException(status_code=400, detail=f"unsupported manual override fields: {', '.join(unknown)}")
+    return payload
+
+
 @app.get("/api/results")
 async def get_results(
     limit: int = 50,
@@ -1139,9 +1208,9 @@ async def get_results(
     user: Dict[str, Any] = Depends(get_current_user),
 ):
     """获取招标结果"""
+    search_query = q
     filters = {}
     for key, value in {
-        "q": q,
         "fit_status": fit_status,
         "follow_decision": follow_decision,
         "urgency": urgency,
@@ -1158,6 +1227,10 @@ async def get_results(
         bids, total = app_state.storage.query_results(filters, limit, offset)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+    if search_query not in (None, ""):
+        bids = [bid for bid in bids if _matches_result_query(bid, search_query)]
+        total = len(bids)
 
     return {
         "total": total,
@@ -1204,7 +1277,13 @@ async def bulk_update_result_review(payload: Dict[str, Any], user: Dict[str, Any
 
 @app.patch("/api/results/{result_id}/fields")
 async def update_result_fields(result_id: int, payload: Dict[str, Any], user: Dict[str, Any] = Depends(get_current_user)):
-    app_state.storage.update_manual_overrides(result_id, payload)
+    bid = app_state.storage.get_by_id(result_id)
+    if not bid:
+        raise _result_not_found(result_id)
+    updates = _validate_manual_override_payload(payload)
+    merged = dict(bid.manual_overrides or {})
+    merged.update(updates)
+    app_state.storage.update_manual_overrides(result_id, merged)
     return {"success": True}
 
 

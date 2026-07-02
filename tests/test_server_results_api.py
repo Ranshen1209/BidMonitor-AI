@@ -63,6 +63,33 @@ class ServerResultsApiTests(unittest.TestCase):
         self.storage.query_results.assert_called_once()
         self.assertEqual(self.storage.query_results.call_args.args[0]["fit_status"], "pending")
 
+    def test_get_results_applies_q_without_forwarding_unsupported_filter(self):
+        bid = self.make_bid()
+        bid.title = "智能化项目A"
+        self.storage.query_results.return_value = ([bid], 1)
+
+        result = asyncio.run(app.get_results(limit=20, offset=0, q="智能化", user={"role": "user"}))
+
+        self.assertEqual(result["total"], 1)
+        self.assertEqual(len(result["items"]), 1)
+        self.assertNotIn("q", self.storage.query_results.call_args.args[0])
+
+    def test_get_results_q_filters_current_page_without_crashing(self):
+        matching = self.make_bid()
+        matching.title = "智能化项目A"
+        non_matching = self.make_bid()
+        non_matching.id = 8
+        non_matching.title = "市政项目B"
+        non_matching.category = "市政工程"
+        non_matching.ai_extracted_data = {"organization": "市政单位", "deadlines": []}
+        non_matching.manual_overrides = {"organization": "人工市政单位"}
+        self.storage.query_results.return_value = ([matching, non_matching], 2)
+
+        result = asyncio.run(app.get_results(limit=20, offset=0, q="智能化", user={"role": "user"}))
+
+        self.assertEqual(result["total"], 1)
+        self.assertEqual([item["id"] for item in result["items"]], [7])
+
     def test_get_result_detail_returns_ai_manual_and_resolved_data(self):
         bid = self.make_bid()
         self.storage.get_by_id.return_value = bid
@@ -115,10 +142,35 @@ class ServerResultsApiTests(unittest.TestCase):
         self.storage.update_review.assert_not_called()
 
     def test_update_manual_fields_saves_overrides(self):
+        bid = self.make_bid()
+        bid.manual_overrides = {"organization": "人工单位", "region": "上海"}
+        self.storage.get_by_id.return_value = bid
+
         result = asyncio.run(app.update_result_fields(7, {"organization": "修正单位", "amount": "80"}, user={"role": "user"}))
 
         self.assertTrue(result["success"])
-        self.storage.update_manual_overrides.assert_called_once_with(7, {"organization": "修正单位", "amount": "80"})
+        self.storage.update_manual_overrides.assert_called_once_with(
+            7,
+            {"organization": "修正单位", "region": "上海", "amount": "80"},
+        )
+
+    def test_update_manual_fields_rejects_nonexistent_result(self):
+        self.storage.get_by_id.return_value = None
+
+        with self.assertRaises(app.HTTPException) as ctx:
+            asyncio.run(app.update_result_fields(7, {"organization": "修正单位"}, user={"role": "user"}))
+
+        self.assertEqual(ctx.exception.status_code, 404)
+        self.storage.update_manual_overrides.assert_not_called()
+
+    def test_update_manual_fields_rejects_unknown_override_keys(self):
+        self.storage.get_by_id.return_value = self.make_bid()
+
+        with self.assertRaises(app.HTTPException) as ctx:
+            asyncio.run(app.update_result_fields(7, {"unexpected": "value"}, user={"role": "user"}))
+
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.storage.update_manual_overrides.assert_not_called()
 
     def test_result_settings_masks_defaults_and_updates_reasons_for_admin(self):
         settings = asyncio.run(app.get_result_settings(user={"role": "user"}))

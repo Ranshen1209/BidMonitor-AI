@@ -52,6 +52,12 @@ class UrlListCrawlerTests(unittest.TestCase):
             merged_config.update(config)
         return UrlListCrawler(merged_config, merged_source)
 
+    def write_topologies(self, tmpdir, sites):
+        path = os.path.join(tmpdir, "site_topologies.json")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(json.dumps({"version": 1, "sites": sites}, ensure_ascii=False))
+        return path
+
     def test_txt_url_list_reading_deduplicates_and_skips_invalid_values(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = os.path.join(tmpdir, "urls.txt")
@@ -87,6 +93,1077 @@ class UrlListCrawlerTests(unittest.TestCase):
                 self.make_crawler(fallback_path).get_list_urls(),
                 ["https://example.com/fallback"],
             )
+
+    def test_json_url_source_reads_canonical_registry(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "url_sources.json")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(
+                    json.dumps(
+                        {
+                            "version": 1,
+                            "sources": [
+                                {
+                                    "id": "okcis",
+                                    "name": "招标采购导航网",
+                                    "url": "https://www.okcis.cn/",
+                                    "enabled": True,
+                                }
+                            ],
+                        },
+                        ensure_ascii=False,
+                    )
+                )
+
+            crawler = self.make_crawler_with_source_config(
+                path,
+                os.path.join(tmpdir, "diagnostics.jsonl"),
+                {"source_type": "json"},
+            )
+
+            self.assertEqual(crawler.get_list_urls(), ["https://www.okcis.cn/"])
+
+    @patch.object(UrlListCrawler, "_request_url")
+    def test_category_pages_are_not_saved_and_detail_links_are_verified(self, mock_request_url):
+        def fake_request(url):
+            if url == "https://example.com/":
+                return (
+                    "<html><body><a href='/security/'>安防工程</a></body></html>",
+                    200,
+                    "OK",
+                )
+            if url == "https://example.com/security/":
+                return (
+                    "<html><body><ul>"
+                    "<li><a href='/notice/1.html'>上海安防工程公开招标公告</a><span>2026-07-02</span></li>"
+                    "</ul></body></html>",
+                    200,
+                    "OK",
+                )
+            if url == "https://example.com/notice/1.html":
+                return (
+                    "<html><body><h1>上海安防工程公开招标公告</h1>"
+                    "<p>发布时间：2026-07-02</p>"
+                    "<p>采购单位：上海测试单位</p>"
+                    "<p>公告正文：本项目采购安防监控系统。</p></body></html>",
+                    200,
+                    "OK",
+                )
+            raise AssertionError(f"unexpected url {url}")
+
+        mock_request_url.side_effect = fake_request
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "urls.txt")
+            diagnostics_path = os.path.join(tmpdir, "diagnostics.jsonl")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("https://example.com/\n")
+
+            crawler = self.make_crawler_with_source_config(
+                path,
+                diagnostics_path,
+                {"topology_max_depth": 3, "max_follow_links_per_page": 20},
+            )
+            bids = crawler.crawl()
+
+            self.assertEqual(len(bids), 1)
+            self.assertEqual(bids[0].title, "上海安防工程公开招标公告")
+            self.assertEqual(bids[0].url, "https://example.com/notice/1.html")
+            self.assertNotEqual(bids[0].url, "https://example.com/security/")
+            self.assertIn("original_url: https://example.com/notice/1.html", bids[0].content)
+
+    @patch.object(UrlListCrawler, "_request_url")
+    def test_index_style_list_pages_are_traversal_only_even_when_html_suffix_matches_detail(self, mock_request_url):
+        list_url = "https://www.ccgp.gov.cn/cggg/zygg/gkzb/index_1.htm"
+        detail_url = "https://www.ccgp.gov.cn/cggg/zygg/gkzb/202607/t20260702_12345678.htm"
+
+        def fake_request(url):
+            if url == list_url:
+                return (
+                    "<html><body><h1>公开招标公告_中国政府采购网</h1>"
+                    "<nav>首页 高级搜索 上一页 下一页 共100条</nav>"
+                    f"<a href='{detail_url}'>上海安防工程公开招标公告</a>"
+                    "</body></html>",
+                    200,
+                    "OK",
+                )
+            if url == detail_url:
+                return (
+                    "<html><body><h1>上海安防工程公开招标公告</h1>"
+                    "<p>发布时间：2026-07-02</p>"
+                    "<p>采购单位：上海测试单位</p>"
+                    "<p>公告正文：本项目采购安防监控系统。</p></body></html>",
+                    200,
+                    "OK",
+                )
+            raise AssertionError(f"unexpected url {url}")
+
+        mock_request_url.side_effect = fake_request
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "urls.txt")
+            diagnostics_path = os.path.join(tmpdir, "diagnostics.jsonl")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(f"{list_url}\n")
+
+            crawler = self.make_crawler_with_source_config(path, diagnostics_path, {"topology_max_depth": 2})
+            bids = crawler.crawl()
+
+            self.assertEqual(crawler._classify_url(list_url)["page_type"], "list")
+            self.assertEqual(len(bids), 1)
+            self.assertEqual(bids[0].url, detail_url)
+
+    @patch.object(UrlListCrawler, "_request_url")
+    def test_generic_non_detail_page_is_not_saved_even_with_bid_keywords(self, mock_request_url):
+        mock_request_url.return_value = (
+            "<html><body><h1>安防工程招标公告</h1>"
+            "<p>本栏目汇总安防工程、监控系统、弱电项目的招标公告。</p>"
+            "<p>请进入具体公告查看采购单位、项目编号和预算金额。</p></body></html>",
+            200,
+            "OK",
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "urls.txt")
+            diagnostics_path = os.path.join(tmpdir, "diagnostics.jsonl")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("https://example.com/security/\n")
+
+            bids = self.make_crawler_with_source_config(path, diagnostics_path, {"topology_max_depth": 1}).crawl()
+
+            self.assertEqual(bids, [])
+
+    def test_parse_does_not_emit_same_page_bid_for_traversal_page_without_detail_links(self):
+        crawler = self.make_crawler_with_source_config(
+            "/tmp/missing.txt",
+            None,
+            {},
+        )
+
+        bids = crawler._parse_page(
+            "<html><body><h1>安防工程招标公告</h1>"
+            "<p>本栏目汇总安防工程、监控系统、弱电项目的招标公告。</p>"
+            "<p>请进入具体公告查看采购单位、项目编号和预算金额。</p></body></html>",
+            "https://example.com/security/",
+            "2026-07-03T00:00:00",
+        )
+
+        self.assertEqual(bids, [])
+
+    @patch.object(UrlListCrawler, "_request_url")
+    def test_entry_http_exception_without_browser_still_tries_topology_seeds(self, mock_request_url):
+        def fake_request(url):
+            if url == "https://portal.example.com/":
+                raise requests.exceptions.Timeout("entry slow")
+            if url == "https://portal.example.com/notices/":
+                return (
+                    "<html><body><a href='/detail/42'>上海安防工程公开招标公告</a></body></html>",
+                    200,
+                    "OK",
+                )
+            if url == "https://portal.example.com/detail/42":
+                return (
+                    "<html><body><h1>上海安防工程公开招标公告</h1>"
+                    "<p>发布时间：2026-07-02</p><p>采购单位：上海测试单位</p>"
+                    "<p>公告正文：本项目采购安防监控系统。</p></body></html>",
+                    200,
+                    "OK",
+                )
+            raise AssertionError(f"unexpected url {url}")
+
+        mock_request_url.side_effect = fake_request
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            urls_path = os.path.join(tmpdir, "urls.txt")
+            diagnostics_path = os.path.join(tmpdir, "diagnostics.jsonl")
+            with open(urls_path, "w", encoding="utf-8") as f:
+                f.write("https://portal.example.com/\n")
+            topology_path = self.write_topologies(
+                tmpdir,
+                [
+                    {
+                        "id": "portal",
+                        "name": "入口测试",
+                        "entry_url": "https://portal.example.com/",
+                        "allowed_hosts": ["portal.example.com"],
+                        "seed_urls": ["https://portal.example.com/notices/"],
+                        "list_url_regex": [r"/notices/?$"],
+                        "detail_url_regex": [r"/detail/\d+$"],
+                    }
+                ],
+            )
+
+            crawler = self.make_crawler_with_source_config(
+                urls_path,
+                diagnostics_path,
+                {"topology_max_depth": 2},
+                config={"site_topologies_path": topology_path},
+            )
+            bids = crawler.crawl()
+
+            self.assertEqual(len(bids), 1)
+            self.assertEqual(bids[0].url, "https://portal.example.com/detail/42")
+
+    @patch.object(UrlListCrawler, "_request_url")
+    def test_topology_seed_urls_are_crawled_even_when_home_has_no_links(self, mock_request_url):
+        def fake_request(url):
+            if url == "https://portal.example.com/":
+                return ("<html><body><div id='app'></div></body></html>", 200, "OK")
+            if url == "https://portal.example.com/notices/":
+                return (
+                    "<html><body><a href='/detail/42'>上海安防工程公开招标公告</a></body></html>",
+                    200,
+                    "OK",
+                )
+            if url == "https://portal.example.com/detail/42":
+                return (
+                    "<html><body><h1>上海安防工程公开招标公告</h1>"
+                    "<p>发布时间：2026-07-02</p><p>采购单位：上海测试单位</p>"
+                    "<p>公告正文：本项目采购安防监控系统。</p></body></html>",
+                    200,
+                    "OK",
+                )
+            raise AssertionError(f"unexpected url {url}")
+
+        mock_request_url.side_effect = fake_request
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            urls_path = os.path.join(tmpdir, "urls.txt")
+            diagnostics_path = os.path.join(tmpdir, "diagnostics.jsonl")
+            with open(urls_path, "w", encoding="utf-8") as f:
+                f.write("https://portal.example.com/\n")
+            topology_path = self.write_topologies(
+                tmpdir,
+                [
+                    {
+                        "id": "portal",
+                        "name": "示例公告门户",
+                        "entry_url": "https://portal.example.com/",
+                        "seed_urls": ["/notices/"],
+                        "detail_url_regex": [r"/detail/\d+$"],
+                        "list_url_regex": [r"/notices/?$"],
+                    }
+                ],
+            )
+
+            crawler = self.make_crawler_with_source_config(
+                urls_path,
+                diagnostics_path,
+                {"topology_max_depth": 2},
+                config={"site_topologies_path": topology_path},
+            )
+            bids = crawler.crawl()
+
+            self.assertEqual(len(bids), 1)
+            self.assertEqual(bids[0].url, "https://portal.example.com/detail/42")
+
+    @patch.object(UrlListCrawler, "_request_url")
+    def test_topology_seed_urls_are_prioritized_over_noisy_entry_links(self, mock_request_url):
+        def fake_request(url):
+            if url == "https://portal.example.com/":
+                noisy_links = "".join(
+                    f"<a href='/category/{index}'>安防工程公告栏目 {index}</a>" for index in range(5)
+                )
+                return (f"<html><body>{noisy_links}</body></html>", 200, "OK")
+            if url == "https://portal.example.com/notices/":
+                return (
+                    "<html><body><a href='/detail/42'>上海安防工程公开招标公告</a></body></html>",
+                    200,
+                    "OK",
+                )
+            if url == "https://portal.example.com/detail/42":
+                return (
+                    "<html><body><h1>上海安防工程公开招标公告</h1>"
+                    "<p>发布时间：2026-07-02</p><p>采购单位：上海测试单位</p>"
+                    "<p>公告正文：本项目采购安防监控系统。</p></body></html>",
+                    200,
+                    "OK",
+                )
+            if "/category/" in url:
+                return ("<html><body><p>空栏目</p></body></html>", 200, "OK")
+            raise AssertionError(f"unexpected url {url}")
+
+        mock_request_url.side_effect = fake_request
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            urls_path = os.path.join(tmpdir, "urls.txt")
+            diagnostics_path = os.path.join(tmpdir, "diagnostics.jsonl")
+            with open(urls_path, "w", encoding="utf-8") as f:
+                f.write("https://portal.example.com/\n")
+            topology_path = self.write_topologies(
+                tmpdir,
+                [
+                    {
+                        "id": "portal",
+                        "name": "入口测试",
+                        "entry_url": "https://portal.example.com/",
+                        "allowed_hosts": ["portal.example.com"],
+                        "seed_urls": ["https://portal.example.com/notices/"],
+                        "list_url_regex": [r"/(?:notices|category/\d+)/?$"],
+                        "detail_url_regex": [r"/detail/\d+$"],
+                    }
+                ],
+            )
+
+            crawler = self.make_crawler_with_source_config(
+                urls_path,
+                diagnostics_path,
+                {"topology_max_depth": 2, "max_follow_links_per_page": 1},
+                config={"site_topologies_path": topology_path},
+            )
+            bids = crawler.crawl()
+
+            self.assertEqual(len(bids), 1)
+            self.assertEqual(bids[0].url, "https://portal.example.com/detail/42")
+
+    def test_topology_template_seed_urls_are_not_requested_without_values(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            urls_path = os.path.join(tmpdir, "urls.txt")
+            with open(urls_path, "w", encoding="utf-8") as f:
+                f.write("https://portal.example.com/\n")
+            topology_path = self.write_topologies(
+                tmpdir,
+                [
+                    {
+                        "id": "portal",
+                        "name": "示例公告门户",
+                        "entry_url": "https://portal.example.com/",
+                        "seed_urls": ["https://portal.example.com/search?kw={kw}", "/notices/"],
+                    }
+                ],
+            )
+            crawler = self.make_crawler_with_source_config(
+                urls_path,
+                os.path.join(tmpdir, "diagnostics.jsonl"),
+                {},
+                config={"site_topologies_path": topology_path},
+            )
+
+            links = crawler._topology_seed_links("https://portal.example.com/")
+
+            self.assertEqual([link["url"] for link in links], ["https://portal.example.com/notices/"])
+
+    @patch.object(UrlListCrawler, "_request_url")
+    def test_topology_allowed_hosts_follow_cross_host_detail_links(self, mock_request_url):
+        def fake_request(url):
+            if url == "https://www.example.com/":
+                return (
+                    "<html><body><a href='https://bidding.example.com/notice-detail-7.html'>"
+                    "上海智能化工程招标公告</a></body></html>",
+                    200,
+                    "OK",
+                )
+            if url == "https://bidding.example.com/notice-detail-7.html":
+                return (
+                    "<html><body><h1>上海智能化工程招标公告</h1>"
+                    "<p>发布时间：2026-07-02</p><p>采购单位：上海测试单位</p>"
+                    "<p>公告正文：本项目采购智能化系统。</p></body></html>",
+                    200,
+                    "OK",
+                )
+            raise AssertionError(f"unexpected url {url}")
+
+        mock_request_url.side_effect = fake_request
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            urls_path = os.path.join(tmpdir, "urls.txt")
+            diagnostics_path = os.path.join(tmpdir, "diagnostics.jsonl")
+            with open(urls_path, "w", encoding="utf-8") as f:
+                f.write("https://www.example.com/\n")
+            topology_path = self.write_topologies(
+                tmpdir,
+                [
+                    {
+                        "id": "cross-host",
+                        "name": "跨域示例站",
+                        "entry_url": "https://www.example.com/",
+                        "allowed_hosts": ["www.example.com", "bidding.example.com"],
+                        "detail_url_regex": [r"^https://bidding\.example\.com/notice-detail-\d+\.html$"],
+                    }
+                ],
+            )
+
+            crawler = self.make_crawler_with_source_config(
+                urls_path,
+                diagnostics_path,
+                {"topology_max_depth": 1},
+                config={"site_topologies_path": topology_path},
+            )
+            bids = crawler.crawl()
+
+            self.assertEqual(len(bids), 1)
+            self.assertEqual(bids[0].url, "https://bidding.example.com/notice-detail-7.html")
+
+    @patch.object(UrlListCrawler, "_request_url")
+    def test_topology_blocked_phrases_reject_masked_detail_pages(self, mock_request_url):
+        mock_request_url.return_value = (
+            "<html><body><h1>上海安防工程招标公告</h1>"
+            "<p>发布时间：2026-07-02</p><p>采购单位：上海测试单位</p>"
+            "<p>登录即可免费查看完整信息，本项目采购安防监控系统。</p></body></html>",
+            200,
+            "OK",
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            urls_path = os.path.join(tmpdir, "urls.txt")
+            diagnostics_path = os.path.join(tmpdir, "diagnostics.jsonl")
+            with open(urls_path, "w", encoding="utf-8") as f:
+                f.write("https://masked.example.com/detail/99\n")
+            topology_path = self.write_topologies(
+                tmpdir,
+                [
+                    {
+                        "id": "masked",
+                        "name": "遮罩示例站",
+                        "entry_url": "https://masked.example.com/",
+                        "detail_url_regex": [r"/detail/\d+$"],
+                        "blocked_phrases": ["登录即可免费查看完整信息"],
+                    }
+                ],
+            )
+
+            crawler = self.make_crawler_with_source_config(
+                urls_path,
+                diagnostics_path,
+                {},
+                config={"site_topologies_path": topology_path},
+            )
+            bids = crawler.crawl()
+
+            self.assertEqual(bids, [])
+            with open(diagnostics_path, "r", encoding="utf-8") as f:
+                diagnostic = json.loads(f.readline())
+            self.assertIn("登录即可免费查看完整信息", diagnostic["reason"])
+
+    @patch.object(UrlListCrawler, "_request_url")
+    def test_security_script_tokens_do_not_block_visible_public_detail(self, mock_request_url):
+        mock_request_url.return_value = (
+            "<html><body><h1>上海监控设备改造招标公告</h1>"
+            "<p>发布时间：2026-07-02</p><p>采购单位：上海测试单位</p>"
+            "<p>公告正文：本项目采购安防监控系统。</p>"
+            "<script src='/assets/captcha-frontend.js'>AliyunCaptcha.init()</script>"
+            "</body></html>",
+            200,
+            "OK",
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            urls_path = os.path.join(tmpdir, "urls.txt")
+            diagnostics_path = os.path.join(tmpdir, "diagnostics.jsonl")
+            with open(urls_path, "w", encoding="utf-8") as f:
+                f.write("https://www.bidcenter.test/news-428272056-1.html\n")
+            topology_path = self.write_topologies(
+                tmpdir,
+                [
+                    {
+                        "id": "bidcenter-test",
+                        "name": "采招测试",
+                        "entry_url": "https://www.bidcenter.test/",
+                        "allowed_hosts": ["www.bidcenter.test"],
+                        "detail_url_regex": [r"/news-\d+-\d+\.html$"],
+                        "blocked_phrases": ["AliyunCaptcha", "captcha-frontend"],
+                    }
+                ],
+            )
+
+            crawler = self.make_crawler_with_source_config(
+                urls_path,
+                diagnostics_path,
+                {},
+                config={"site_topologies_path": topology_path},
+            )
+            bids = crawler.crawl()
+
+            self.assertEqual(len(bids), 1)
+            self.assertEqual(bids[0].title, "上海监控设备改造招标公告")
+            self.assertEqual(bids[0].url, "https://www.bidcenter.test/news-428272056-1.html")
+
+    @patch.object(UrlListCrawler, "_request_url")
+    def test_topology_seeds_are_tried_when_entry_page_is_blocked(self, mock_request_url):
+        def fake_request(url):
+            if url == "https://blocked.example.com/":
+                return ("anti bot shell", 521, "Origin Down")
+            if url == "https://list.blocked.example.com/notices.html":
+                return (
+                    "<html><body><a href='https://detail.blocked.example.com/info-8.html'>"
+                    "上海安防工程公开招标公告</a></body></html>",
+                    200,
+                    "OK",
+                )
+            if url == "https://detail.blocked.example.com/info-8.html":
+                return (
+                    "<html><body><h1>上海安防工程公开招标公告</h1>"
+                    "<p>发布时间：2026-07-02</p><p>采购单位：上海测试单位</p>"
+                    "<p>公告正文：本项目采购安防监控系统。</p></body></html>",
+                    200,
+                    "OK",
+                )
+            raise AssertionError(f"unexpected url {url}")
+
+        mock_request_url.side_effect = fake_request
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            urls_path = os.path.join(tmpdir, "urls.txt")
+            diagnostics_path = os.path.join(tmpdir, "diagnostics.jsonl")
+            with open(urls_path, "w", encoding="utf-8") as f:
+                f.write("https://blocked.example.com/\n")
+            topology_path = self.write_topologies(
+                tmpdir,
+                [
+                    {
+                        "id": "blocked-entry",
+                        "name": "阻断入口示例",
+                        "entry_url": "https://blocked.example.com/",
+                        "allowed_hosts": [
+                            "blocked.example.com",
+                            "list.blocked.example.com",
+                            "detail.blocked.example.com",
+                        ],
+                        "seed_urls": ["https://list.blocked.example.com/notices.html"],
+                        "list_url_regex": [r"notices\.html$"],
+                        "detail_url_regex": [r"/info-\d+\.html$"],
+                    }
+                ],
+            )
+
+            crawler = self.make_crawler_with_source_config(
+                urls_path,
+                diagnostics_path,
+                {"topology_max_depth": 2},
+                config={"site_topologies_path": topology_path},
+            )
+            bids = crawler.crawl()
+
+            self.assertEqual(len(bids), 1)
+            self.assertEqual(bids[0].url, "https://detail.blocked.example.com/info-8.html")
+
+    @patch.object(UrlListCrawler, "_request_url")
+    def test_topology_extracts_non_href_candidate_attributes(self, mock_request_url):
+        detail_url = "https://www.okcis.test/20260702-n2-20260702010101010101.html"
+
+        def fake_request(url):
+            if url == "https://www.okcis.test/zbmf/":
+                return (
+                    "<html><body>"
+                    "<b class='setwidth' rec_link='/20260702-n2-20260702010101010101.html' "
+                    "rec_title='上海安防工程公开招标公告'></b>"
+                    "</body></html>",
+                    200,
+                    "OK",
+                )
+            if url == detail_url:
+                return (
+                    "<html><body><h1>上海安防工程公开招标公告</h1>"
+                    "<p>发布时间：2026-07-02</p><p>采购单位：上海测试单位</p>"
+                    "<p>公告正文：本项目采购安防监控系统。</p></body></html>",
+                    200,
+                    "OK",
+                )
+            raise AssertionError(f"unexpected url {url}")
+
+        mock_request_url.side_effect = fake_request
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            urls_path = os.path.join(tmpdir, "urls.txt")
+            diagnostics_path = os.path.join(tmpdir, "diagnostics.jsonl")
+            with open(urls_path, "w", encoding="utf-8") as f:
+                f.write("https://www.okcis.test/zbmf/\n")
+            topology_path = self.write_topologies(
+                tmpdir,
+                [
+                    {
+                        "id": "okcis-test",
+                        "name": "OKcis 测试",
+                        "entry_url": "https://www.okcis.test/",
+                        "allowed_hosts": ["www.okcis.test"],
+                        "list_url_regex": [r"/zbmf/?$"],
+                        "detail_url_regex": [r"^https://www\.okcis\.test/\d{8}-n\d-\d{20}\.html$"],
+                    }
+                ],
+            )
+
+            crawler = self.make_crawler_with_source_config(
+                urls_path,
+                diagnostics_path,
+                {"topology_max_depth": 1},
+                config={"site_topologies_path": topology_path},
+            )
+            bids = crawler.crawl()
+
+            self.assertEqual(len(bids), 1)
+            self.assertEqual(bids[0].url, detail_url)
+            self.assertEqual(bids[0].title, "上海安防工程公开招标公告")
+
+    @patch.object(UrlListCrawler, "_request_url")
+    def test_topology_extracts_sdicc_urlchange_detail_links(self, mock_request_url):
+        list_url = "https://www.sdicc.test/"
+        detail_url = "https://www.sdicc.test/cgxx/ggDetail?gcGuid=gc-123&ggGuid=gg-456"
+
+        def fake_request(url):
+            if url == list_url:
+                return (
+                    "<html><body><div onclick=\"urlChange('gg-456','gc-123')\">"
+                    "上海智能化工程招标公告</div></body></html>",
+                    200,
+                    "OK",
+                )
+            if url == detail_url:
+                return (
+                    "<html><body><h1>上海智能化工程招标公告</h1>"
+                    "<p>发布时间：2026-07-02</p><p>招标人：上海测试单位</p>"
+                    "<p>公告正文：本项目采购智能化系统。</p></body></html>",
+                    200,
+                    "OK",
+                )
+            raise AssertionError(f"unexpected url {url}")
+
+        mock_request_url.side_effect = fake_request
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            urls_path = os.path.join(tmpdir, "urls.txt")
+            diagnostics_path = os.path.join(tmpdir, "diagnostics.jsonl")
+            with open(urls_path, "w", encoding="utf-8") as f:
+                f.write(f"{list_url}\n")
+            topology_path = self.write_topologies(
+                tmpdir,
+                [
+                    {
+                        "id": "sdicc-test",
+                        "name": "国投测试",
+                        "entry_url": list_url,
+                        "allowed_hosts": ["www.sdicc.test"],
+                        "detail_url_regex": [r"/cgxx/ggDetail\?gcGuid=[^&]+&ggGuid=[^&]+$"],
+                    }
+                ],
+            )
+
+            crawler = self.make_crawler_with_source_config(
+                urls_path,
+                diagnostics_path,
+                {"topology_max_depth": 1},
+                config={"site_topologies_path": topology_path},
+            )
+            bids = crawler.crawl()
+
+            self.assertEqual(len(bids), 1)
+            self.assertEqual(bids[0].url, detail_url)
+
+    @patch.object(UrlListCrawler, "_request_url")
+    def test_topology_extracts_js_detail_even_when_page_has_regular_href_candidates(self, mock_request_url):
+        list_url = "https://www.sdicc.test/"
+        detail_url = "https://www.sdicc.test/cgxx/ggDetail?gcGuid=gc-123&ggGuid=gg-456"
+
+        def fake_request(url):
+            if url == list_url:
+                return (
+                    "<html><body>"
+                    "<a href='/cgxx/cgxxList?page=2'>安防工程公告更多列表</a>"
+                    "<div onclick=\"urlChange('gg-456','gc-123')\">上海智能化工程招标公告</div>"
+                    "</body></html>",
+                    200,
+                    "OK",
+                )
+            if url == detail_url:
+                return (
+                    "<html><body><h1>上海智能化工程招标公告</h1>"
+                    "<p>发布时间：2026-07-02</p><p>招标人：上海测试单位</p>"
+                    "<p>公告正文：本项目采购智能化系统。</p></body></html>",
+                    200,
+                    "OK",
+                )
+            if "page=2" in url:
+                return ("<html><body><p>空列表</p></body></html>", 200, "OK")
+            raise AssertionError(f"unexpected url {url}")
+
+        mock_request_url.side_effect = fake_request
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            urls_path = os.path.join(tmpdir, "urls.txt")
+            diagnostics_path = os.path.join(tmpdir, "diagnostics.jsonl")
+            with open(urls_path, "w", encoding="utf-8") as f:
+                f.write(f"{list_url}\n")
+            topology_path = self.write_topologies(
+                tmpdir,
+                [
+                    {
+                        "id": "sdicc-test",
+                        "name": "国投测试",
+                        "entry_url": list_url,
+                        "allowed_hosts": ["www.sdicc.test"],
+                        "list_url_regex": [r"/cgxx/cgxxList(?:\?.*)?$"],
+                        "detail_url_regex": [r"/cgxx/ggDetail\?gcGuid=[^&]+&ggGuid=[^&]+$"],
+                    }
+                ],
+            )
+
+            crawler = self.make_crawler_with_source_config(
+                urls_path,
+                diagnostics_path,
+                {"topology_max_depth": 1, "max_follow_links_per_page": 10},
+                config={"site_topologies_path": topology_path},
+            )
+            bids = crawler.crawl()
+
+            self.assertEqual(len(bids), 1)
+            self.assertEqual(bids[0].url, detail_url)
+
+    @patch.object(UrlListCrawler, "_request_url")
+    def test_sdicc_public_detail_action_button_does_not_block_admission(self, mock_request_url):
+        list_url = "https://www.sdicc.com.cn/cgxx/cgxxList"
+        detail_url = "https://www.sdicc.com.cn/cgxx/ggDetail?gcGuid=da97f2f1-64ca-4222-9d50-b976b16dbd2b&ggGuid=76cdd52c-8d91-4901-9a83-d28475fc5a6d"
+
+        def fake_request(url):
+            if url == list_url:
+                return (
+                    "<html><body><div onclick=\"urlChange('76cdd52c-8d91-4901-9a83-d28475fc5a6d','da97f2f1-64ca-4222-9d50-b976b16dbd2b')\">"
+                    "上海安防工程招标公告</div></body></html>",
+                    200,
+                    "OK",
+                )
+            if url == detail_url:
+                return (
+                    "<html><body><nav>用户登录</nav><button>我要投标</button>"
+                    "<h1>上海安防工程招标公告</h1>"
+                    "<p>发布时间：2026-07-02</p><p>招标人：上海测试单位</p>"
+                    "<p>公告正文：本项目采购安防监控系统。</p></body></html>",
+                    200,
+                    "OK",
+                )
+            raise AssertionError(f"unexpected url {url}")
+
+        mock_request_url.side_effect = fake_request
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            urls_path = os.path.join(tmpdir, "urls.txt")
+            diagnostics_path = os.path.join(tmpdir, "diagnostics.jsonl")
+            with open(urls_path, "w", encoding="utf-8") as f:
+                f.write(f"{list_url}\n")
+
+            crawler = self.make_crawler_with_source_config(
+                urls_path,
+                diagnostics_path,
+                {"topology_max_depth": 1},
+            )
+            bids = crawler.crawl()
+
+            self.assertEqual(len(bids), 1)
+            self.assertEqual(bids[0].url, detail_url)
+
+    def test_sdicc_detail_regex_accepts_query_params_in_either_order(self):
+        crawler = self.make_crawler_with_source_config("/tmp/missing.txt", None, {})
+        topology = crawler._topology_for_url("https://www.sdicc.com.cn/cgxx/cgxxList")
+        self.assertIsNotNone(topology)
+
+        self.assertEqual(
+            crawler._classify_url_by_topology(
+                "https://www.sdicc.com.cn/cgxx/ggDetail?gcGuid=da97f2f1-64ca-4222-9d50-b976b16dbd2b&ggGuid=76cdd52c-8d91-4901-9a83-d28475fc5a6d",
+                topology,
+            ),
+            "detail",
+        )
+        self.assertEqual(
+            crawler._classify_url_by_topology(
+                "https://www.sdicc.com.cn/cgxx/ggDetail?gcGuid=da97f2f1-64ca-4222-9d50-b976b16dbd2b&ggGuid=76cdd52c-8d91-4901-9a83-d28475fc5a6d"
+                "&tab=公告",
+                topology,
+            ),
+            "detail",
+        )
+        self.assertEqual(
+            crawler._classify_url_by_topology(
+                "https://www.sdicc.com.cn/cgxx/ggDetail?ggGuid=76cdd52c-8d91-4901-9a83-d28475fc5a6d&gcGuid=da97f2f1-64ca-4222-9d50-b976b16dbd2b",
+                topology,
+            ),
+            "detail",
+        )
+
+    @patch.object(UrlListCrawler, "_request_url")
+    def test_title_only_detail_shell_is_rejected_until_body_evidence_exists(self, mock_request_url):
+        mock_request_url.return_value = (
+            "<html><body><h1>上海安防工程公开招标公告</h1>"
+            "<p>登录后查看完整信息。</p></body></html>",
+            200,
+            "OK",
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            urls_path = os.path.join(tmpdir, "urls.txt")
+            diagnostics_path = os.path.join(tmpdir, "diagnostics.jsonl")
+            with open(urls_path, "w", encoding="utf-8") as f:
+                f.write("https://example.com/detail/42\n")
+
+            bids = self.make_crawler_with_source_config(urls_path, diagnostics_path, {}).crawl()
+
+            self.assertEqual(bids, [])
+
+    @patch.object(UrlListCrawler, "_request_url")
+    def test_chnenergy_public_detail_ca_navigation_does_not_block_admission(self, mock_request_url):
+        list_url = "https://www.chnenergybidding.com.cn/bidweb/001/001001/moreinfo.html"
+        detail_url = "https://www.chnenergybidding.com.cn/bidweb/001/001001/001001001/20260702/abc.html"
+
+        def fake_request(url):
+            if url == list_url:
+                return (
+                    f"<html><body><a href='{detail_url}'>上海弱电系统采购招标公告</a></body></html>",
+                    200,
+                    "OK",
+                )
+            if url == detail_url:
+                return (
+                    "<html><body><nav>CA办理 我要投标</nav>"
+                    "<h1>上海弱电系统采购招标公告</h1>"
+                    "<p>发布时间：2026-07-02</p><p>招标人：上海测试单位</p>"
+                    "<p>公告正文：本项目采购弱电系统。</p></body></html>",
+                    200,
+                    "OK",
+                )
+            raise AssertionError(f"unexpected url {url}")
+
+        mock_request_url.side_effect = fake_request
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            urls_path = os.path.join(tmpdir, "urls.txt")
+            diagnostics_path = os.path.join(tmpdir, "diagnostics.jsonl")
+            with open(urls_path, "w", encoding="utf-8") as f:
+                f.write(f"{list_url}\n")
+
+            crawler = self.make_crawler_with_source_config(
+                urls_path,
+                diagnostics_path,
+                {"topology_max_depth": 1},
+            )
+            bids = crawler.crawl()
+
+            self.assertEqual(len(bids), 1)
+            self.assertEqual(bids[0].url, detail_url)
+
+    @patch.object(UrlListCrawler, "_request_url")
+    def test_topology_extracts_notice_detail_javascript_links(self, mock_request_url):
+        list_url = "https://cg.95306.test/"
+        detail_url = "https://cg.95306.test/baseinfor/notice/informationShow?id=abc123"
+
+        def fake_request(url):
+            if url == list_url:
+                return (
+                    "<html><body><a onclick=\"noticeDetail('abc123')\">"
+                    "上海轨道弱电系统采购公告</a></body></html>",
+                    200,
+                    "OK",
+                )
+            if url == detail_url:
+                return (
+                    "<html><body><h1>上海轨道弱电系统采购公告</h1>"
+                    "<p>发布时间：2026-07-02</p><p>采购单位：上海测试单位</p>"
+                    "<p>公告正文：本项目采购弱电系统。</p></body></html>",
+                    200,
+                    "OK",
+                )
+            raise AssertionError(f"unexpected url {url}")
+
+        mock_request_url.side_effect = fake_request
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            urls_path = os.path.join(tmpdir, "urls.txt")
+            diagnostics_path = os.path.join(tmpdir, "diagnostics.jsonl")
+            with open(urls_path, "w", encoding="utf-8") as f:
+                f.write(f"{list_url}\n")
+            topology_path = self.write_topologies(
+                tmpdir,
+                [
+                    {
+                        "id": "gt95306-test",
+                        "name": "国铁测试",
+                        "entry_url": list_url,
+                        "allowed_hosts": ["cg.95306.test"],
+                        "detail_url_regex": [r"/baseinfor/notice/informationShow\?id=[A-Za-z0-9_-]+$"],
+                    }
+                ],
+            )
+
+            crawler = self.make_crawler_with_source_config(
+                urls_path,
+                diagnostics_path,
+                {"topology_max_depth": 1},
+                config={"site_topologies_path": topology_path},
+            )
+            bids = crawler.crawl()
+
+            self.assertEqual(len(bids), 1)
+            self.assertEqual(bids[0].url, detail_url)
+
+    @patch.object(UrlListCrawler, "_request_url")
+    def test_topology_extracts_embedded_json_detail_urls(self, mock_request_url):
+        detail_url = "https://www.qianlima.test/bid-610713231.html"
+
+        def fake_request(url):
+            if url == "https://www.qianlima.test/zbgg/":
+                return (
+                    "<html><body><script>window.__NUXT__={state:{bidding:{listData:["
+                    "{\"pcUrl\":\"https://www.qianlima.test/bid-610713231.html\","
+                    "\"title\":\"上海弱电智能化公开招标公告\"}]}}}</script></body></html>",
+                    200,
+                    "OK",
+                )
+            if url == detail_url:
+                return (
+                    "<html><body><h1>上海弱电智能化公开招标公告</h1>"
+                    "<p>发布时间：2026-07-02</p><p>采购单位：上海测试单位</p>"
+                    "<p>公告正文：本项目采购弱电智能化系统。</p></body></html>",
+                    200,
+                    "OK",
+                )
+            raise AssertionError(f"unexpected url {url}")
+
+        mock_request_url.side_effect = fake_request
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            urls_path = os.path.join(tmpdir, "urls.txt")
+            diagnostics_path = os.path.join(tmpdir, "diagnostics.jsonl")
+            with open(urls_path, "w", encoding="utf-8") as f:
+                f.write("https://www.qianlima.test/zbgg/\n")
+            topology_path = self.write_topologies(
+                tmpdir,
+                [
+                    {
+                        "id": "qianlima-test",
+                        "name": "千里马测试",
+                        "entry_url": "https://www.qianlima.test/",
+                        "allowed_hosts": ["www.qianlima.test"],
+                        "list_url_regex": [r"/zbgg/?$"],
+                        "detail_url_regex": [r"^https://www\.qianlima\.test/bid-\d+\.html$"],
+                    }
+                ],
+            )
+
+            crawler = self.make_crawler_with_source_config(
+                urls_path,
+                diagnostics_path,
+                {"topology_max_depth": 1},
+                config={"site_topologies_path": topology_path},
+            )
+            bids = crawler.crawl()
+
+            self.assertEqual(len(bids), 1)
+            self.assertEqual(bids[0].url, detail_url)
+            self.assertEqual(bids[0].title, "上海弱电智能化公开招标公告")
+
+    @patch.object(UrlListCrawler, "_request_url")
+    @patch.object(UrlListCrawler, "_request_url_with_browser")
+    def test_browser_mode_falls_back_during_topology_crawl_when_http_cannot_parse_links(self, mock_browser, mock_http):
+        def fake_http(url):
+            if url == "https://example.com/list":
+                return ("<html><body><div id='app'></div></body></html>", 200, "OK")
+            if url == "https://example.com/notice/1.html":
+                return (
+                    "<html><body><h1>上海安防工程公开招标公告</h1>"
+                    "<p>发布时间：2026-07-02</p>"
+                    "<p>采购单位：上海测试单位</p>"
+                    "<p>公告正文：本项目采购安防监控系统。</p></body></html>",
+                    200,
+                    "OK",
+                )
+            raise AssertionError(f"unexpected url {url}")
+
+        mock_http.side_effect = fake_http
+        mock_browser.return_value = (
+            "<html><body><a href='/notice/1.html'>上海安防工程公开招标公告</a></body></html>",
+            200,
+            "Browser",
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "urls.txt")
+            diagnostics_path = os.path.join(tmpdir, "diagnostics.jsonl")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("https://example.com/list\n")
+
+            crawler = self.make_crawler_with_source_config(
+                path,
+                diagnostics_path,
+                {"topology_max_depth": 1},
+                config={"use_selenium": True},
+            )
+
+            bids = crawler.crawl()
+
+            self.assertEqual(len(bids), 1)
+            self.assertEqual(bids[0].url, "https://example.com/notice/1.html")
+            mock_browser.assert_called_once_with("https://example.com/list")
+
+    @patch.object(UrlListCrawler, "_request_url")
+    @patch.object(UrlListCrawler, "_request_url_with_browser")
+    def test_browser_mode_falls_back_when_entry_http_raises(self, mock_browser, mock_http):
+        mock_http.side_effect = requests.exceptions.Timeout("slow")
+        mock_browser.return_value = (
+            "<html><body><h1>上海安防工程公开招标公告</h1>"
+            "<p>发布时间：2026-07-02</p>"
+            "<p>采购单位：上海测试单位</p>"
+            "<p>公告正文：本项目采购安防监控系统。</p></body></html>",
+            200,
+            "Browser",
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "urls.txt")
+            diagnostics_path = os.path.join(tmpdir, "diagnostics.jsonl")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("https://example.com/detail\n")
+
+            crawler = self.make_crawler_with_source_config(
+                path,
+                diagnostics_path,
+                {},
+                config={"use_selenium": True},
+            )
+
+            bids = crawler.crawl()
+
+            self.assertEqual(len(bids), 1)
+            self.assertEqual(bids[0].url, "https://example.com/detail")
+            mock_browser.assert_called_once_with("https://example.com/detail")
+
+    @patch.object(UrlListCrawler, "_request_url")
+    @patch.object(UrlListCrawler, "_request_url_with_browser")
+    def test_browser_mode_falls_back_when_child_detail_http_raises(self, mock_browser, mock_http):
+        def fake_http(url):
+            if url == "https://example.com/list":
+                return (
+                    "<html><body><a href='/detail/1'>上海安防工程公开招标公告</a></body></html>",
+                    200,
+                    "OK",
+                )
+            if url == "https://example.com/detail/1":
+                raise requests.exceptions.Timeout("slow")
+            raise AssertionError(f"unexpected url {url}")
+
+        mock_http.side_effect = fake_http
+        mock_browser.return_value = (
+            "<html><body><h1>上海安防工程公开招标公告</h1>"
+            "<p>发布时间：2026-07-02</p>"
+            "<p>采购单位：上海测试单位</p>"
+            "<p>公告正文：本项目采购安防监控系统。</p></body></html>",
+            200,
+            "Browser",
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "urls.txt")
+            diagnostics_path = os.path.join(tmpdir, "diagnostics.jsonl")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("https://example.com/list\n")
+
+            crawler = self.make_crawler_with_source_config(
+                path,
+                diagnostics_path,
+                {"topology_max_depth": 1},
+                config={"use_selenium": True},
+            )
+
+            bids = crawler.crawl()
+
+            self.assertEqual(len(bids), 1)
+            self.assertEqual(bids[0].url, "https://example.com/detail/1")
+            mock_browser.assert_called_once_with("https://example.com/detail/1")
 
     @patch.object(UrlListCrawler, "_request_url")
     def test_accessible_html_generates_bid_info(self, mock_request_url):
@@ -135,7 +1212,7 @@ class UrlListCrawlerTests(unittest.TestCase):
             with open(path, "w", encoding="utf-8") as f:
                 f.write("https://example.com/403\n")
                 f.write("https://example.com/timeout\n")
-                f.write("https://example.com/ok\n")
+                f.write("https://example.com/detail-ok\n")
 
             bids = self.make_crawler(path, diagnostics_path).crawl()
 

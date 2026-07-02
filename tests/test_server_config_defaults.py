@@ -32,7 +32,7 @@ class ServerConfigDefaultsTests(unittest.TestCase):
         finally:
             app.app_state.logs = original_logs
 
-    def test_default_config_targets_shanghai_url_list_first(self):
+    def test_default_config_targets_canonical_url_sources_first(self):
         with patch.object(app.os.path, "exists", return_value=False):
             config = app.load_config()
 
@@ -41,13 +41,15 @@ class ServerConfigDefaultsTests(unittest.TestCase):
         self.assertEqual(config["must_contain"], "")
         self.assertFalse(config["use_selenium"])
         self.assertEqual(config["enabled_sites"], [])
-        self.assertEqual(config["csv_url_sources"][0]["name"], "上海招投标URL清单")
+        self.assertEqual(config["csv_url_sources"][0]["name"], "招标URL源")
+        self.assertEqual(config["csv_url_sources"][0]["source_type"], "json")
         self.assertTrue(config["csv_url_sources"][0]["enabled"])
-        self.assertTrue(config["csv_url_sources"][0]["file_path"].endswith("bid_related_url_list.txt"))
+        self.assertTrue(config["csv_url_sources"][0]["file_path"].endswith("server/url_sources.json"))
         self.assertEqual(config["csv_url_sources"][0]["domain_delay"], 2)
         self.assertEqual(config["csv_url_sources"][0]["auth_cookies"], [])
         self.assertEqual(config["browser_backend"]["mode"], "http")
         self.assertFalse(config["browser_backend"]["cloakbrowser_enabled"])
+        self.assertTrue(config["site_topologies_path"].endswith("server/site_topologies.json"))
         self.assertEqual(config["site_metadata"], {})
         self.assertIn("non_follow_reason_tags", config)
         self.assertIn("地域问题", config["non_follow_reason_tags"])
@@ -67,17 +69,42 @@ class ServerConfigDefaultsTests(unittest.TestCase):
         self.assertNotIn("stealth", serialized)
         self.assertNotIn("bypass", serialized)
 
-    def test_sites_api_uses_bid_related_url_list_as_builtin_sites(self):
+    def test_sites_api_uses_canonical_url_sources_as_builtin_sites(self):
         sites = app.get_default_sites()
 
-        self.assertEqual(len(sites), 30)
-        self.assertIn("url_list_001", sites)
-        self.assertEqual(sites["url_list_001"]["url"], "http://www.qianlima.com/")
-        self.assertEqual(sites["url_list_030"]["url"], "https://sxtsrm.sngbs.com.cn/epoint-sso/default/login_bidder?display=bidder&response_type=code&redirect_uri=https%3A%2F%2Fsxtsrm.sngbs.com.cn%2Ftpbidder%2Fdefault%2Flogin_auto%3Ftimestamp%3D1761792220671&state=ba11004e-49ec-4c24-be5c-b09bcac4b354&code_challenge_method=S256&client_id=98c4cd51-bb2b-4f6d-afc2-998badd9e586&code_challenge=73E4B098310F270722DD315BCA6263786A36025F4CBC8C7CCC34B441DFDF11B6")
-        self.assertNotIn("dlzb", sites)
-        self.assertNotIn("powerchina", sites)
+        self.assertEqual(len(sites), 16)
+        self.assertIn("qianlima", sites)
+        self.assertIn("ccgp", sites)
+        self.assertEqual(sites["qianlima"]["url"], "https://www.qianlima.com/")
+        self.assertEqual(sites["ccgp"]["url"], "https://www.ccgp.gov.cn/")
+        self.assertNotIn("url_list_001", sites)
+        self.assertNotIn("url_list_030", sites)
 
-    def test_load_config_backfills_url_source_cookie_and_rate_limit_defaults(self):
+    def test_normalize_config_removes_legacy_url_list_enabled_sites(self):
+        normalized = app.normalize_config(
+            {
+                "enabled_sites": ["url_list_001", "url_list_030", "chinabidding"],
+                "csv_url_sources": [],
+            }
+        )
+
+        self.assertEqual(normalized["enabled_sites"], ["chinabidding"])
+
+    def test_normalize_config_removes_legacy_url_list_site_metadata(self):
+        normalized = app.normalize_config(
+            {
+                "enabled_sites": [],
+                "site_metadata": {
+                    "url_list_001": {"note": "old source"},
+                    "chinabidding": {"note": "keep"},
+                },
+                "csv_url_sources": [],
+            }
+        )
+
+        self.assertEqual(normalized["site_metadata"], {"chinabidding": {"note": "keep"}})
+
+    def test_load_config_migrates_legacy_url_source_and_backfills_defaults(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = os.path.join(tmpdir, "server_config.json")
             with open(config_path, "w", encoding="utf-8") as f:
@@ -98,8 +125,26 @@ class ServerConfigDefaultsTests(unittest.TestCase):
                 config = app.load_config()
 
         source = config["csv_url_sources"][0]
+        self.assertEqual(source["name"], "招标URL源")
+        self.assertEqual(source["source_type"], "json")
+        self.assertEqual(source["file_path"], app.DEFAULT_URL_SOURCES_PATH)
         self.assertEqual(source["domain_delay"], 2)
         self.assertEqual(source["auth_cookies"], [])
+
+    def test_load_config_marks_json_url_sources(self):
+        normalized = app.normalize_config(
+            {
+                "csv_url_sources": [
+                    {
+                        "name": "招标URL源",
+                        "file_path": app.DEFAULT_URL_SOURCES_PATH,
+                        "enabled": True,
+                    }
+                ]
+            }
+        )
+
+        self.assertEqual(normalized["csv_url_sources"][0]["source_type"], "json")
 
     def test_load_config_backfills_site_metadata_defaults(self):
         normalized = app.normalize_config({"enabled_sites": []})
@@ -312,9 +357,9 @@ class ServerConfigDefaultsTests(unittest.TestCase):
 
     def test_get_sites_merges_metadata_and_returns_full_shape(self):
         app.app_state.config = {
-            "enabled_sites": ["url_list_001"],
+            "enabled_sites": ["chinabidding"],
             "site_metadata": {
-                "url_list_001": {
+                "chinabidding": {
                     "display_name": "上海政府采购",
                     "access_status": "public_no_antibot",
                     "requires_login": False,
@@ -330,10 +375,10 @@ class ServerConfigDefaultsTests(unittest.TestCase):
         sites = asyncio.run(app.get_sites(user={"role": "user"}))
         first = sites[0]
 
-        self.assertEqual(first["key"], "url_list_001")
-        self.assertEqual(first["name"], "上海招投标URL 001")
+        self.assertEqual(first["key"], "chinabidding")
+        self.assertEqual(first["name"], "机电产品招标投标电子交易平台")
         self.assertEqual(first["display_name"], "上海政府采购")
-        self.assertEqual(first["url"], "http://www.qianlima.com/")
+        self.assertEqual(first["url"], "https://www.chinabidding.com/")
         self.assertTrue(first["enabled"])
         self.assertEqual(first["access_status"], "public_no_antibot")
         self.assertFalse(first["requires_login"])
@@ -344,14 +389,39 @@ class ServerConfigDefaultsTests(unittest.TestCase):
         self.assertNotIn("unexpected", first)
 
     def test_update_sites_accepts_legacy_string_list(self):
-        app.app_state.config = {"enabled_sites": [], "site_metadata": {"url_list_001": {"note": "keep"}}}
+        app.app_state.config = {"enabled_sites": [], "site_metadata": {"chinabidding": {"note": "keep"}}}
 
         with patch.object(app, "save_config") as save_config:
-            response = asyncio.run(app.update_sites(["url_list_001"], user={"role": "admin"}))
+            response = asyncio.run(app.update_sites(["url_list_001", "chinabidding"], user={"role": "admin"}))
 
         self.assertTrue(response["success"])
-        self.assertEqual(app.app_state.config["enabled_sites"], ["url_list_001"])
-        self.assertEqual(app.app_state.config["site_metadata"], {"url_list_001": {"note": "keep"}})
+        self.assertEqual(app.app_state.config["enabled_sites"], ["chinabidding"])
+        self.assertEqual(app.app_state.config["site_metadata"], {"chinabidding": {"note": "keep"}})
+        save_config.assert_called_once_with(app.app_state.config)
+
+    def test_update_sites_filters_legacy_metadata_payload(self):
+        app.app_state.config = {"enabled_sites": [], "site_metadata": {}}
+        payload = {
+            "sites": [
+                {
+                    "key": "url_list_001",
+                    "enabled": True,
+                    "note": "old URL source",
+                },
+                {
+                    "key": "chinabidding",
+                    "enabled": True,
+                    "note": "canonical source",
+                },
+            ]
+        }
+
+        with patch.object(app, "save_config") as save_config:
+            response = asyncio.run(app.update_sites(payload, user={"role": "admin"}))
+
+        self.assertTrue(response["success"])
+        self.assertEqual(app.app_state.config["enabled_sites"], ["chinabidding"])
+        self.assertEqual(app.app_state.config["site_metadata"], {"chinabidding": {"note": "canonical source"}})
         save_config.assert_called_once_with(app.app_state.config)
 
     def test_update_sites_accepts_metadata_payload_and_filters_fields(self):
@@ -359,7 +429,7 @@ class ServerConfigDefaultsTests(unittest.TestCase):
         payload = {
             "sites": [
                 {
-                    "key": "url_list_001",
+                    "key": "chinabidding",
                     "enabled": True,
                     "display_name": "上海政府采购",
                     "access_status": "public_no_antibot",
@@ -372,7 +442,7 @@ class ServerConfigDefaultsTests(unittest.TestCase):
                     "name": "should not save",
                 },
                 {
-                    "key": "url_list_002",
+                    "key": "rccchina",
                     "enabled": False,
                     "note": "暂不启用",
                 },
@@ -383,11 +453,11 @@ class ServerConfigDefaultsTests(unittest.TestCase):
             response = asyncio.run(app.update_sites(payload, user={"role": "admin"}))
 
         self.assertTrue(response["success"])
-        self.assertEqual(app.app_state.config["enabled_sites"], ["url_list_001"])
+        self.assertEqual(app.app_state.config["enabled_sites"], ["chinabidding"])
         self.assertEqual(
             app.app_state.config["site_metadata"],
             {
-                "url_list_001": {
+                "chinabidding": {
                     "display_name": "上海政府采购",
                     "access_status": "public_no_antibot",
                     "requires_login": False,
@@ -396,7 +466,7 @@ class ServerConfigDefaultsTests(unittest.TestCase):
                     "last_checked_at": "2026-07-01T10:00:00+08:00",
                     "last_diagnostic": "HTTP 200",
                 },
-                "url_list_002": {
+                "rccchina": {
                     "note": "暂不启用",
                 },
             },

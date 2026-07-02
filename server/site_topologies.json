@@ -1,0 +1,858 @@
+{
+  "version": 2,
+  "generated_from": "SubAgent topology probes and current rule registry on 2026-07-02",
+  "sites": [
+    {
+      "id": "chinabidding",
+      "name": "机电产品招标投标电子交易平台",
+      "entry_url": "https://www.chinabidding.com/",
+      "allowed_hosts": [
+        "www.chinabidding.com",
+        "chinabidding.com",
+        "nbl.ebnew.com",
+        "cas.ebnew.com"
+      ],
+      "preferred_fetch": "http",
+      "seed_urls": [
+        "https://www.chinabidding.com/",
+        "https://www.chinabidding.com/search/proj.htm",
+        "https://www.chinabidding.com/search/proj.htm?poClass=BidNotice&infoClassCodes=(0105%200103)",
+        "https://www.chinabidding.com/search/proj.htm?poClass=BidChange&infoClassCodes=(0106%200104)",
+        "https://www.chinabidding.com/search/proj.htm?poClass=BidResult&infoClassCodes=0107",
+        "https://www.chinabidding.com/search/proj.htm?poClass=BidResult&infoClassCodes=0108"
+      ],
+      "list_url_regex": [
+        "^https?://www\\.chinabidding\\.com/search/proj\\.htm(?:\\?.*)?$"
+      ],
+      "detail_url_regex": [
+        "^https?://www\\.chinabidding\\.com/bidDetail/\\d+(?:-(?:BidChange|BidResult))?\\.html$"
+      ],
+      "candidate_extraction": [
+        "a[href*='/bidDetail/']",
+        "search result rows under /search/proj.htm"
+      ],
+      "detail_selectors": [
+        ".active.title h1",
+        ".active.title em",
+        ".active.title a[href*=bid_purchase]",
+        "section.text"
+      ],
+      "blocked_phrases": [
+        "请登录",
+        "cas/login",
+        "/bid/index/loginIndex.htm",
+        "/user/page/common/login"
+      ],
+      "search": {
+        "method": "GET_OR_POST",
+        "url": "https://www.chinabidding.com/search/proj.htm",
+        "params": [
+          "fullText",
+          "pubDate",
+          "infoClassCodes",
+          "normIndustry",
+          "zoneCode",
+          "fundSourceCodes",
+          "poClass",
+          "rangeType",
+          "currentPage"
+        ]
+      },
+      "admission_policy": "full_public_if_detail_has_title_and_procurement_fields",
+      "block_policy": "purchase/bid actions can be gated; public notice pages may be admitted"
+    },
+    {
+      "id": "rccchina",
+      "name": "RCC瑞达恒",
+      "entry_url": "https://www.rccchina.com/",
+      "allowed_hosts": [
+        "www.rccchina.com",
+        "rccchina.com",
+        "buidingprojects.rccchina.com"
+      ],
+      "preferred_fetch": "http",
+      "seed_urls": [
+        "https://www.rccchina.com/services/building_project_list?province_id=28",
+        "https://www.rccchina.com/services/bid_project_list",
+        "https://www.rccchina.com/services/project_list?id=100&page=1"
+      ],
+      "list_url_regex": [
+        "^https?://(?:www|buidingprojects)\\.rccchina\\.com/services/(building|bid)_project_list(?:\\?.*)?$",
+        "^https?://www\\.rccchina\\.com/services/project_list\\?id=\\d+(?:&page=\\d+)?$"
+      ],
+      "detail_url_regex": [
+        "^https?://(?:www|buidingprojects)\\.rccchina\\.com/services/(building|bid|industry)_project_list/[A-Za-z0-9_+=-]+$"
+      ],
+      "candidate_extraction": [
+        "a.project_link_text[href*='/services/'][href*='_project_list/']",
+        "a[data-id][href*='/services/building_project_list/']",
+        ".project_recommend_item_box a.project_link_button"
+      ],
+      "detail_selectors": [
+        ".project_title",
+        ".bid_title_left",
+        ".project_location",
+        ".column_desc + .column_text",
+        ".project_info_detail_text"
+      ],
+      "blocked_phrases": [
+        "*****",
+        "查看详情",
+        "/rcc/free_regist",
+        "申请试用",
+        "请登录RCC瑞达恒",
+        "166********"
+      ],
+      "search": {
+        "method": "GET",
+        "url": "https://www.rccchina.com/services/project_list",
+        "params": [
+          "id",
+          "province_id",
+          "city_id",
+          "cate_id",
+          "page"
+        ]
+      },
+      "admission_policy": "partial_only; public fragments can guide traversal, masked core fields must not be inferred",
+      "block_policy": "commercial masked contacts/details are diagnostics unless full body is public"
+    },
+    {
+      "id": "plap",
+      "name": "军队采购网",
+      "entry_url": "https://www.plap.mil.cn/",
+      "allowed_hosts": [
+        "www.plap.mil.cn",
+        "plap.mil.cn"
+      ],
+      "preferred_fetch": "browser_auto",
+      "seed_urls": [
+        "https://www.plap.mil.cn/freecms-glht/site/juncai//cggg/index.html"
+      ],
+      "list_url_regex": [
+        "^https?://www\\.plap\\.mil\\.cn/freecms-glht/site/juncai//?cggg/index\\.html(?:\\?.*)?$"
+      ],
+      "detail_url_regex": [
+        "^https?://www\\.plap\\.mil\\.cn/freecms/site/juncai/ggxx/info/\\d{4}/[^/]+\\.html\\?noticeType=[^&]+&channel=[^&]+$"
+      ],
+      "candidate_extraction": [
+        "#pagination list rows",
+        "a[href*='/freecms/site/juncai/ggxx/info/']"
+      ],
+      "detail_selectors": [
+        ".info-title",
+        ".info-article",
+        ".article-content",
+        "table"
+      ],
+      "blocked_phrases": [
+        "auth-center",
+        "请登录",
+        "附件下载需登录"
+      ],
+      "search": {
+        "method": "unknown_js",
+        "url": "https://www.plap.mil.cn/freecms-glht/site/juncai//cggg/index.html",
+        "params": [
+          "title",
+          "purchaseNumber",
+          "stateDate",
+          "endDate"
+        ]
+      },
+      "admission_policy": "full_public_detail_with_project_fields",
+      "block_policy": "attachments or bidding workflows may redirect to auth-center; do not submit forms"
+    },
+    {
+      "id": "chnenergybidding",
+      "name": "国能e招",
+      "entry_url": "https://www.chnenergybidding.com.cn/bidweb/",
+      "allowed_hosts": [
+        "www.chnenergybidding.com.cn",
+        "chnenergybidding.com.cn"
+      ],
+      "preferred_fetch": "http",
+      "seed_urls": [
+        "https://www.chnenergybidding.com.cn/bidweb/",
+        "https://www.chnenergybidding.com.cn/bidweb/001/001001/moreinfo.html"
+      ],
+      "list_url_regex": [
+        "^https?://www\\.chnenergybidding\\.com\\.cn/bidweb/001/[^/]+/(moreinfo|\\d+)\\.html$"
+      ],
+      "detail_url_regex": [
+        "^https?://www\\.chnenergybidding\\.com\\.cn/bidweb/001/[^/]+/[^/]+/\\d{8}/[^/]+\\.html$"
+      ],
+      "candidate_extraction": [
+        "a[href*='/bidweb/001/'][href$='.html']",
+        "list rows under /moreinfo.html"
+      ],
+      "detail_selectors": [
+        ".article-info",
+        ".article",
+        ".content",
+        "h1"
+      ],
+      "blocked_phrases": [
+        "请登录"
+      ],
+      "action_only_phrases": [
+        "我要投标",
+        "CA办理"
+      ],
+      "search": {
+        "method": "GET",
+        "url": "https://www.chnenergybidding.com.cn/bidcms/shfrontpage/searchdayList.jspx",
+        "params": [
+          "categoryNum",
+          "type"
+        ]
+      },
+      "admission_policy": "full_public_detail_under_bidweb_001",
+      "block_policy": "do not follow supplier/CA/bid purchase flows"
+    },
+    {
+      "id": "gt95306",
+      "name": "国铁采购平台",
+      "entry_url": "https://cg.95306.cn/",
+      "allowed_hosts": [
+        "cg.95306.cn"
+      ],
+      "preferred_fetch": "browser_auto",
+      "seed_urls": [
+        "https://cg.95306.cn/",
+        "https://cg.95306.cn/baseinfor/notice/toBuyNoticeMore?bidType=01&noticeType=01&transactionType=01&navigation=c&wzType=&title=",
+        "https://cg.95306.cn/baseinfor/notice/toBuyNoticeMore?bidType=000&noticeType=01&transactionType=01&navigation=d&wzType=&title=",
+        "https://cg.95306.cn/baseinfor/notice/toBuyNoticeMore?bidType=10&noticeType=01&transactionType=02&navigation=h&wzType=&title=",
+        "https://cg.95306.cn/proxy/portal/mainPage/information/queryListForMainPage"
+      ],
+      "list_url_regex": [
+        "^https?://cg\\.95306\\.cn/baseinfor/notice/toBuyNoticeMore(?:\\?.*)?$",
+        "^https?://cg\\.95306\\.cn/proxy/portal/(mainPage/information/queryListForMainPage|elasticSearch/queryDataToEs)$"
+      ],
+      "detail_url_regex": [
+        "^https?://cg\\.95306\\.cn/baseinfor/notice/informationShow\\?id=[0-9a-fA-F-]+$"
+      ],
+      "candidate_extraction": [
+        "noticeDetail(id) -> /baseinfor/notice/informationShow?id={id}",
+        "noticeMore(...) -> /baseinfor/notice/toBuyNoticeMore?...",
+        "GET /proxy/portal/mainPage/information/queryListForMainPage",
+        "POST /proxy/portal/elasticSearch/queryDataToEs"
+      ],
+      "detail_selectors": [
+        ".top_tit h1",
+        ".article_info",
+        ".article_detail",
+        "#enclosure",
+        "#relevantNotice",
+        "API: data.noticeContent.notTitle/checkTime/inforCode/notCont"
+      ],
+      "blocked_phrases": [
+        "请完成安全验证",
+        "向右滑动填充拼图",
+        "用户取消验证码操作，未查询到任何数据!",
+        "请登录后查看附件",
+        "您尚未登录，请先登录！",
+        "code=0-0203"
+      ],
+      "search": {
+        "method": "POST",
+        "url": "https://cg.95306.cn/proxy/portal/elasticSearch/queryDataToEs",
+        "params": [
+          "mhId",
+          "projBidType",
+          "bidType",
+          "noticeType",
+          "unitType",
+          "wzType",
+          "title",
+          "inforCode",
+          "startDate",
+          "endDate",
+          "pageNum",
+          "projType",
+          "professionalCode",
+          "createPeopUnit",
+          "sortCondition",
+          "disposalMethod"
+        ]
+      },
+      "admission_policy": "detail route is public shell; real body is exposed by public indexView API when available",
+      "block_policy": "login/register links are navigation; public notices should remain readable"
+    },
+    {
+      "id": "bidizhaobiao",
+      "name": "比地招标网",
+      "entry_url": "https://www.bidizhaobiao.com/",
+      "allowed_hosts": [
+        "www.bidizhaobiao.com",
+        "storage-cdn.bidizhaobiao.com",
+        "security.bidizhaobiao.com"
+      ],
+      "preferred_fetch": "browser_auto",
+      "seed_urls": [
+        "https://www.bidizhaobiao.com/",
+        "https://www.bidizhaobiao.com/zbgg/",
+        "https://www.bidizhaobiao.com/advsearch/retrieval_list.do"
+      ],
+      "list_url_regex": [
+        "^https?://www\\.bidizhaobiao\\.com/(zbgg|zbxx|zbyg)(?:/|$)",
+        "^https?://www\\.bidizhaobiao\\.com/advsearch/retrieval_list\\.do(?:\\?.*)?$"
+      ],
+      "detail_url_regex": [
+        "^https?://www\\.bidizhaobiao\\.com/info-\\d+\\.html(?:\\?(?:companyId|searchWord)=[^#]+)?$"
+      ],
+      "candidate_extraction": [
+        "disabled when security shell present",
+        "a[href^='/info-']",
+        "a[href*='/info-'][title]"
+      ],
+      "detail_selectors": [
+        "h1",
+        ".detail",
+        ".content",
+        ".article"
+      ],
+      "blocked_phrases": [
+        "环境安全检查",
+        "浏览器安全检查遇到问题",
+        "安全认证",
+        "IP存在访问异常",
+        "BROWSER_ID",
+        "JSEncrypt",
+        "FingerprintJS",
+        "今日次数已用完",
+        "登录 即可查看"
+      ],
+      "search": {
+        "method": "POST",
+        "url": "https://www.bidizhaobiao.com/advsearch/retrieval_list.do",
+        "params": [
+          "searchCondition.SearchWord",
+          "pageNum",
+          "province_id",
+          "cid",
+          "searchCondition.dtype",
+          "searchCondition.SearchType",
+          "regionId",
+          "stime",
+          "etime"
+        ]
+      },
+      "admission_policy": "do_not_ingest_security_shell; partial only when visible body exists",
+      "block_policy": "security/certification gated pages are diagnostics"
+    },
+    {
+      "id": "zfcg-sh",
+      "name": "上海市政府采购网",
+      "entry_url": "https://www.zfcg.sh.gov.cn/",
+      "allowed_hosts": [
+        "www.zfcg.sh.gov.cn",
+        "zfcg.sh.gov.cn",
+        "home.zfcg.sh.gov.cn"
+      ],
+      "preferred_fetch": "browser_auto",
+      "seed_urls": [
+        "https://www.zfcg.sh.gov.cn/site/category?isProvince=true&districtCode=319900&parentId=137027&childrenCode=ZcyAnnouncement10016"
+      ],
+      "list_url_regex": [
+        "^https?://www\\.zfcg\\.sh\\.gov\\.cn/site/category\\?(?:.*&)?parentId=137027(?:&.*)?$",
+        "^https?://www\\.zfcg\\.sh\\.gov\\.cn/portal/searchHome$"
+      ],
+      "detail_url_regex": [
+        "^https?://www\\.zfcg\\.sh\\.gov\\.cn/site/detail\\?(?:.*&)?articleId=[^&]+(?:&.*)?$"
+      ],
+      "candidate_extraction": [
+        "a[href^='/site/detail']",
+        ".po-pagination rendered list anchors"
+      ],
+      "detail_selectors": [
+        "h1",
+        ".article-content",
+        ".notice-content",
+        ".content"
+      ],
+      "blocked_phrases": [
+        "请登录",
+        "验证码",
+        "安全验证"
+      ],
+      "search": {
+        "method": "POST",
+        "url": "https://www.zfcg.sh.gov.cn/portal/searchHome",
+        "params": [
+          "code",
+          "subCodes",
+          "keywords",
+          "pageNo",
+          "pageSize"
+        ]
+      },
+      "admission_policy": "full_public_detail_when_body_or_structured_fields_present",
+      "block_policy": "JS rendering normal; login controls are navigation only for public notices"
+    },
+    {
+      "id": "sdicc",
+      "name": "国投集团电子采购平台",
+      "entry_url": "https://www.sdicc.com.cn/",
+      "allowed_hosts": [
+        "www.sdicc.com.cn",
+        "sdicc.com.cn"
+      ],
+      "preferred_fetch": "browser_auto",
+      "seed_urls": [
+        "https://www.sdicc.com.cn/",
+        "https://www.sdicc.com.cn/cgxx/cgxxList"
+      ],
+      "list_url_regex": [
+        "^https?://www\\.sdicc\\.com\\.cn/cgxx/cgxxList(?:\\?.*)?$"
+      ],
+      "detail_url_regex": [
+        "^https?://www\\.sdicc\\.com\\.cn/cgxx/ggDetail\\?(?=[^#]*gcGuid=[0-9a-f-]+)(?=[^#]*ggGuid=[0-9a-f-]+)[^#]*$"
+      ],
+      "candidate_extraction": [
+        "homepage rows with urlChange(ggGuid,gcGuid)",
+        "a[href*='/cgxx/ggDetail']"
+      ],
+      "detail_selectors": [
+        "h1",
+        ".detail",
+        ".content",
+        "table"
+      ],
+      "blocked_phrases": [
+        "请登录"
+      ],
+      "action_only_phrases": [
+        "我要投标"
+      ],
+      "search": {
+        "method": "unknown_js",
+        "url": "https://www.sdicc.com.cn/cgxx/cgxxList",
+        "params": [
+          "tab",
+          "category",
+          "page"
+        ]
+      },
+      "admission_policy": "full_public_detail_with_project_fields",
+      "block_policy": "public detail is crawlable; 我要投标 requires login and must not be followed"
+    },
+    {
+      "id": "ccgp",
+      "name": "中国政府采购网",
+      "entry_url": "https://www.ccgp.gov.cn/",
+      "allowed_hosts": [
+        "www.ccgp.gov.cn",
+        "ccgp.gov.cn",
+        "search.ccgp.gov.cn"
+      ],
+      "preferred_fetch": "http",
+      "seed_urls": [
+        "https://www.ccgp.gov.cn/cggg/zygg/gkzb/",
+        "https://www.ccgp.gov.cn/cggg/dfgg/gkzb/",
+        "https://search.ccgp.gov.cn/bxsearch"
+      ],
+      "list_url_regex": [
+        "^https?://www\\.ccgp\\.gov\\.cn/cggg/(zygg|dfgg)/[^/]+/(?:index(?:_\\d+)?\\.htm)?$",
+        "^https?://search\\.ccgp\\.gov\\.cn/bxsearch(?:\\?.*)?$"
+      ],
+      "detail_url_regex": [
+        "^https?://www\\.ccgp\\.gov\\.cn/cggg/(zygg|dfgg)/[^/]+/\\d{6}/t\\d{8}_\\d+\\.htm$"
+      ],
+      "candidate_extraction": [
+        "a[href*='/cggg/'][href*='t20'][href$='.htm']",
+        ".vT-srch-result-list li a"
+      ],
+      "detail_selectors": [
+        ".vF_detail_main",
+        ".vF_detail_header",
+        ".vF_detail_content",
+        "table tr"
+      ],
+      "blocked_phrases": [
+        "error.htm",
+        "访问被拒绝",
+        "Forbidden"
+      ],
+      "search": {
+        "method": "GET",
+        "url": "https://search.ccgp.gov.cn/bxsearch",
+        "params": [
+          "kw",
+          "searchtype",
+          "page_index",
+          "bidType",
+          "dbselect",
+          "start_time",
+          "end_time"
+        ]
+      },
+      "admission_policy": "full_public_detail_with_vF_detail_content_or_procurement_fields",
+      "block_policy": "public notices are crawlable; login is not needed for notice details"
+    },
+    {
+      "id": "jiading-edu",
+      "name": "上海市嘉定区教育局",
+      "entry_url": "https://www.jiading.gov.cn/jiaoyu",
+      "allowed_hosts": [
+        "www.jiading.gov.cn",
+        "jiading.gov.cn",
+        "search.sh.gov.cn"
+      ],
+      "preferred_fetch": "http",
+      "seed_urls": [
+        "https://www.jiading.gov.cn/jiaoyu/tzgg/gg",
+        "https://www.jiading.gov.cn/jiaoyu/tzgg/gs"
+      ],
+      "list_url_regex": [
+        "^https?://www\\.jiading\\.gov\\.cn/jiaoyu/tzgg/(gg|gs)(?:_\\d+)?$"
+      ],
+      "detail_url_regex": [
+        "^https?://www\\.jiading\\.gov\\.cn/jiaoyu/tzgg/(gg|gs)/content_\\d+$"
+      ],
+      "candidate_extraction": [
+        ".list-news li a[href*='content_']",
+        ".list-news li date text"
+      ],
+      "detail_selectors": [
+        ".article-content",
+        ".article",
+        ".content"
+      ],
+      "blocked_phrases": [
+        "验证码",
+        "captcha"
+      ],
+      "search": {
+        "method": "POST",
+        "url": "https://search.sh.gov.cn/search",
+        "params": [
+          "text",
+          "pageNo",
+          "pageSize"
+        ]
+      },
+      "admission_policy": "generic education news rejected unless procurement evidence exists",
+      "block_policy": "public official details can be admitted when procurement evidence exists"
+    },
+    {
+      "id": "jszhaobiao",
+      "name": "建设招标网",
+      "entry_url": "https://www.jszhaobiao.com/",
+      "allowed_hosts": [
+        "www.jszhaobiao.com",
+        "bidding.jszhaobiao.com",
+        "wap.jszhaobiao.com"
+      ],
+      "preferred_fetch": "http",
+      "seed_urls": [
+        "https://www.jszhaobiao.com/notice.html",
+        "https://www.jszhaobiao.com/result.html",
+        "https://bidding.jszhaobiao.com/notice.html"
+      ],
+      "list_url_regex": [
+        "^https?://(?:www|bidding)\\.jszhaobiao\\.com/(notice|result|invest|enquiry|negotiate)\\.html(?:\\?.*)?$",
+        "^https?://(?:www|bidding)\\.jszhaobiao\\.com/(notice|result)-\\d+-\\d+-\\d+\\.html$"
+      ],
+      "detail_url_regex": [
+        "^https?://(?:www|bidding)\\.jszhaobiao\\.com/(notice|result|projectinfo)-detail-\\d+\\.html$"
+      ],
+      "candidate_extraction": [
+        "table tbody tr td a[href*='-detail-']",
+        "td[0]=type td[2]=region td[3]=date"
+      ],
+      "detail_selectors": [
+        ".bid-head h2",
+        ".bid-head span",
+        ".bid-con table.com-table",
+        ".con-start",
+        ".con-less",
+        "textarea#view",
+        ".con-txt"
+      ],
+      "blocked_phrases": [
+        "注册/登录 即可查看",
+        "登录查看完整内容",
+        "（* 或 略）部分为隐藏内容",
+        "(略)",
+        "会员"
+      ],
+      "search": {
+        "method": "GET",
+        "url": "https://bidding.jszhaobiao.com/search.html",
+        "params": [
+          "keyword"
+        ]
+      },
+      "admission_policy": "partial_only; title/region/date/type public but body often masked",
+      "block_policy": "masked detail should not feed full-field extraction"
+    },
+    {
+      "id": "okcis",
+      "name": "招标采购导航网",
+      "entry_url": "https://www.okcis.cn/",
+      "allowed_hosts": [
+        "www.okcis.cn",
+        "okcis.cn",
+        "blocksrc.haplat.net"
+      ],
+      "preferred_fetch": "browser_auto",
+      "seed_urls": [
+        "https://www.okcis.cn/",
+        "https://www.okcis.cn/zbmf/",
+        "https://www.okcis.cn/search/"
+      ],
+      "list_url_regex": [
+        "^https?://www\\.okcis\\.cn/(zbmf|bn|zbyg|zbbg|zbjg|nc|searched|search)(?:/|$)"
+      ],
+      "detail_url_regex": [
+        "^https?://www\\.okcis\\.cn/\\d{8}-n\\d-\\d{20}\\.html$"
+      ],
+      "candidate_extraction": [
+        "b.setwidth[rec][rec_link][rec_title]",
+        "a[rec_type][rec_link][rec_title]",
+        "a[onclick*='itemListLooNoLogin'][href]",
+        "regex: /\\d{8}-n\\d-\\d{20}\\.html"
+      ],
+      "detail_selectors": [
+        "h1",
+        ".zx_nr",
+        ".detail",
+        ".content",
+        ".zbgg_zw",
+        ".main"
+      ],
+      "blocked_phrases": [
+        "请输入验证码",
+        "算数结果",
+        "doVerify.php",
+        "400-601-4000",
+        "blocksrc.haplat.net"
+      ],
+      "search": {
+        "method": "POST",
+        "url": "https://www.okcis.cn/searched/",
+        "params": [
+          "result-keyword-and-form",
+          "gen_stokens",
+          "result-infotype-form",
+          "search-time-type"
+        ]
+      },
+      "admission_policy": "do_not_create_bidinfo_from_list_row_alone; detail must load without captcha",
+      "block_policy": "doVerify.php or visible arithmetic captcha means blocked; do_not_ingest /bn/ or detail captcha pages"
+    },
+    {
+      "id": "bidcenter",
+      "name": "采招网",
+      "entry_url": "https://www.bidcenter.com.cn/",
+      "allowed_hosts": [
+        "www.bidcenter.com.cn",
+        "search.bidcenter.com.cn",
+        "static.bidcenter.com.cn",
+        "interface.bidcenter.com.cn"
+      ],
+      "preferred_fetch": "http",
+      "seed_urls": [
+        "https://www.bidcenter.com.cn/",
+        "https://www.bidcenter.com.cn/zbpage-1-1.html",
+        "https://www.bidcenter.com.cn/zbpage-4-1.html"
+      ],
+      "list_url_regex": [
+        "^https?://(?:www\\.)?bidcenter\\.com\\.cn/zbpage-\\d+-\\d+(?:-[^/]+)?\\.html$",
+        "^https?://search\\.bidcenter\\.com\\.cn/search(?:\\.html)?(?:\\?.*)?$"
+      ],
+      "detail_url_regex": [
+        "^https?://www\\.bidcenter\\.com\\.cn/news-\\d+-\\d+\\.html$"
+      ],
+      "candidate_extraction": [
+        "homepage/list li a[href^='/news-'][title]",
+        "regex: news-\\d+-\\d+\\.html"
+      ],
+      "detail_selectors": [
+        "h1",
+        ".news-tit",
+        ".article",
+        ".content",
+        ".detail",
+        ".zbdetail"
+      ],
+      "blocked_phrases": [
+        "人机验证",
+        "手动跳转",
+        "点击查看",
+        "(略)"
+      ],
+      "search": {
+        "method": "GET",
+        "url": "https://search.bidcenter.com.cn/search",
+        "params": [
+          "keywords",
+          "type",
+          "mod"
+        ]
+      },
+      "admission_policy": "full_or_partial_visible_body; masked fields flagged not inferred",
+      "block_policy": "direct captcha pages do_not_ingest; do not classify normal list/detail pages as captcha solely because AliyunCaptcha/captcha-frontend script tokens exist; masked fields such as 点击查看/(略) must be flagged, not inferred"
+    },
+    {
+      "id": "bidchance",
+      "name": "招标网",
+      "entry_url": "https://bidding.bidchance.com/outlinegonggao.html",
+      "allowed_hosts": [
+        "www.bidchance.com",
+        "bidding.bidchance.com",
+        "project.bidchance.com",
+        "chance.bidchance.com"
+      ],
+      "preferred_fetch": "blocked_diagnostic_or_static_list_only",
+      "seed_urls": [
+        "https://bidding.bidchance.com/outlinegonggao.html",
+        "https://bidding.bidchance.com/outlinezhongbiao.html",
+        "https://project.bidchance.com/outlinezjxm.html"
+      ],
+      "list_url_regex": [
+        "^https?://bidding\\.bidchance\\.com/outline(gonggao|zhongbiao|biangeng|purchase|freegg|bidfile).*\\.html$",
+        "^https?://project\\.bidchance\\.com/outline(zjxm|vip|freezjxm).*\\.html$"
+      ],
+      "detail_url_regex": [
+        "^https?://www\\.bidchance\\.com/info-(gonggao|zhongbiao|biangeng|zjxm|purchase)-[A-Za-z0-9]+\\.html$"
+      ],
+      "candidate_extraction": [
+        "GBK decode; dd li.glli a.big[href*='//www.bidchance.com/info-']",
+        "region from a#gre",
+        "date from following li.lit2"
+      ],
+      "detail_selectors": [],
+      "blocked_phrases": [
+        "HTTP 521",
+        "X-Via-JSL",
+        "__jsluid_s",
+        "__jsl_clearance_s",
+        "location.href=location.pathname+location.search"
+      ],
+      "search": {
+        "method": "GET",
+        "url": "https://www.bidchance.com/search.do",
+        "params": [
+          "searchtype",
+          "queryword",
+          "channel",
+          "currentpage"
+        ]
+      },
+      "admission_policy": "static list candidates only; do_not_ingest details unless a detail page loads public body without client block/login/captcha",
+      "block_policy": "do not execute clearance or bypass 521 challenge"
+    },
+    {
+      "id": "jianyu360",
+      "name": "剑鱼标讯官网",
+      "entry_url": "https://www.jianyu360.cn/",
+      "allowed_hosts": [
+        "www.jianyu360.cn",
+        "*.jianyu360.cn",
+        "cdn-ali2.jianyu360.cn",
+        "cdn-common.jianyu360.cn",
+        "cdn-common.jianyu360.com"
+      ],
+      "preferred_fetch": "browser_auto_or_http_home_only",
+      "seed_urls": [
+        "https://www.jianyu360.cn/",
+        "https://www.jianyu360.cn/list/stype/ZBGG.html",
+        "https://www.jianyu360.cn/jylab/supsearch/index.html?keywords={kw}"
+      ],
+      "list_url_regex": [
+        "^https?://www\\.jianyu360\\.cn/$",
+        "^https?://(?:www|[a-z]+)\\.jianyu360\\.cn/list/(stype|keywords|area|city)/.*"
+      ],
+      "detail_url_regex": [
+        "^https?://www\\.jianyu360\\.cn/nologin/content/[A-Za-z0-9_%=.-]+\\.html$",
+        "^https?://www\\.jianyu360\\.cn/swordfish/page_web_pc/proposed/detail\\?pid=[A-Za-z0-9]+$"
+      ],
+      "candidate_extraction": [
+        "a.cms-card-list-item-left.cms-link[href^='/nologin/content/']",
+        "a.cms-link[href^='/swordfish/page_web_pc/proposed/detail']"
+      ],
+      "detail_selectors": [
+        ".article-title",
+        ".article-content",
+        ".detail-content",
+        "#content"
+      ],
+      "blocked_phrases": [
+        "initPageFTCookies",
+        "fid-sdk",
+        "JSEncrypt",
+        "/antiRes/js/mainHook.js",
+        "登录即可免费查看完整信息",
+        "免费查看完整信息",
+        "****",
+        "查看完整"
+      ],
+      "search": {
+        "method": "GET",
+        "url": "https://www.jianyu360.cn/jylab/supsearch/index.html",
+        "params": [
+          "keywords"
+        ]
+      },
+      "admission_policy": "partial_or_blocked; admit only rendered non-empty body without token shell",
+      "block_policy": "anti-token shell and masked body are diagnostics"
+    },
+    {
+      "id": "qianlima",
+      "name": "千里马",
+      "entry_url": "https://www.qianlima.com/",
+      "allowed_hosts": [
+        "www.qianlima.com",
+        "search.qianlima.com",
+        "wap.qianlima.com",
+        "gw-static.qianlima.com",
+        "customer.qianlima.com"
+      ],
+      "preferred_fetch": "browser_auto",
+      "seed_urls": [
+        "https://www.qianlima.com/zbgg/",
+        "https://www.qianlima.com/mfzb",
+        "https://www.qianlima.com/zbyg"
+      ],
+      "list_url_regex": [
+        "^https?://www\\.qianlima\\.com/(zbgg|mfzb|zbyg|zbbg|zbjg)(?:/p\\d+)?/?$",
+        "^https?://www\\.qianlima\\.com/zb/area_\\d+/?$"
+      ],
+      "detail_url_regex": [
+        "^https?://www\\.qianlima\\.com/(?:bid-(?:\\d+-)?\\d+\\.html|zb/detail/\\d{8}_(?:\\d+-)?\\d+\\.html)$"
+      ],
+      "candidate_extraction": [
+        "window.__NUXT__.state.bidding.listData[] fields pcUrl,title,tname,updatetime,url,wapUrl",
+        ".bidding-list .list-single a[href*='bid-']"
+      ],
+      "detail_selectors": [
+        "h1",
+        "sections containing 摘要信息",
+        ".content",
+        ".detail-content"
+      ],
+      "blocked_phrases": [
+        "Access Verification",
+        "人机验证",
+        "请求过于频繁",
+        "请输入正确的验证码",
+        "点击查看",
+        "登录",
+        "VIP",
+        "需要项目通权限才能查看",
+        "需要项目通权限才能查阅"
+      ],
+      "search": {
+        "method": "GET",
+        "url": "https://search.qianlima.com/",
+        "params": [
+          "q"
+        ]
+      },
+      "admission_policy": "list public SSR; observed detail partial/masked, do not infer hidden fields",
+      "block_policy": "project permission/VIP/login pages are diagnostic only, not BidInfo"
+    }
+  ]
+}

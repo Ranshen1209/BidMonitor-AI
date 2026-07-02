@@ -220,8 +220,9 @@ class StaticFrontendAssetsTests(unittest.TestCase):
 
         self.assertNotIn('style="', html)
         self.assertNotIn('style="', js)
-        self.assertIn('<div class="toggle-switch"><span>Selenium浏览器模式</span>', html)
-        self.assertNotIn('onclick="showSmsConfig()"><span>Selenium浏览器模式</span>', html)
+        self.assertIn('<div class="toggle-switch"><span>浏览器模式</span>', html)
+        self.assertIn("CloakBrowser", html)
+        self.assertNotIn('onclick="showSmsConfig()"><span>浏览器模式</span>', html)
         self.assertIn("empty-state-compact", js)
 
     def test_builtin_sites_support_metadata_management_contract(self):

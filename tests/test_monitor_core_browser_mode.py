@@ -75,8 +75,8 @@ class BrowserModeWiringTests(unittest.TestCase):
         self.assertEqual(monitor.crawlers[0].name, "FallbackSite")
         self.assertEqual(monitor.crawlers[0].url, "https://fallback.example.com")
 
-    def test_factory_used_for_default_sites(self):
-        """When use_selenium=True and a default site is enabled, the factory is called for it."""
+    def test_default_sites_do_not_create_browser_crawlers_by_default(self):
+        """Legacy/default site ids are metadata only; canonical JSON source owns crawling."""
         sentinel = MagicMock(name="browser_crawler_default")
 
         fake_default_sites = {
@@ -94,20 +94,17 @@ class BrowserModeWiringTests(unittest.TestCase):
                     },
                 )
 
-        mock_factory.assert_called_once()
-        args = mock_factory.call_args[0]
-        self.assertEqual(args[1], "上海招投标URL 001")
-        self.assertEqual(args[2], "https://default.example.com")
-        self.assertIn(sentinel, monitor.crawlers)
+        mock_factory.assert_not_called()
+        self.assertEqual(monitor.crawlers, [])
 
-    def test_default_sites_fall_back_to_custom_when_factory_returns_none(self):
-        """Default-sites loop: factory returns None -> CustomCrawler for that site."""
+    def test_default_sites_do_not_fall_back_to_custom_by_default(self):
+        """Default sites no longer create CustomCrawler entries by default."""
         fake_default_sites = {
             "url_list_001": {"name": "上海招投标URL 001", "url": "https://default.example.com"}
         }
 
         with patch.object(mc, "get_default_sites", return_value=fake_default_sites):
-            with patch.object(mc, "create_browser_crawler", return_value=None):
+            with patch.object(mc, "create_browser_crawler", return_value=None) as mock_factory:
                 monitor = MonitorCore(
                     keywords=["test"],
                     notify_method="none",
@@ -117,10 +114,8 @@ class BrowserModeWiringTests(unittest.TestCase):
                     },
                 )
 
-        self.assertEqual(len(monitor.crawlers), 1)
-        self.assertIsInstance(monitor.crawlers[0], CustomCrawler)
-        self.assertEqual(monitor.crawlers[0].name, "上海招投标URL 001")
-        self.assertEqual(monitor.crawlers[0].url, "https://default.example.com")
+        mock_factory.assert_not_called()
+        self.assertEqual(monitor.crawlers, [])
 
     def test_factory_not_called_when_selenium_disabled(self):
         """When use_selenium=False, factory should NOT be called; CustomCrawler used directly."""

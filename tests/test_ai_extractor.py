@@ -202,15 +202,17 @@ class AIExtractorTests(unittest.TestCase):
         result_id = storage.save(bid)
 
         with patch("src.results.ai_extractor.fetch_detail_text", return_value=(False, "", "detail timeout")):
-            enrich_new_bid(
-                storage,
-                result_id,
-                bid,
-                {"enable": True, "api_key": "secret", "model": "grok"},
-            )
+            with patch.object(AIExtractor, "extract") as extract:
+                enrich_new_bid(
+                    storage,
+                    result_id,
+                    bid,
+                    {"enable": True, "api_key": "secret", "model": "grok"},
+                )
 
         updated = storage.get_by_id(result_id)
         self.assertIsNotNone(updated)
         self.assertEqual(updated.detail_fetch_status, "failed")
         self.assertEqual(updated.ai_extract_status, "detail_fetch_failed")
         self.assertEqual(updated.ai_extract_error, "detail timeout")
+        extract.assert_not_called()

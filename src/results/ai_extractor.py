@@ -223,9 +223,9 @@ def suggest_urgency(ai_data: dict, now: datetime | None = None) -> dict:
     }
 
 
-def enrich_new_bid(storage, result_id: int, bid, ai_config: dict | None, log_callback=None) -> None:
+def enrich_new_bid(storage, result_id: int, bid, ai_config: dict | None, log_callback=None, fetch_config: dict | None = None) -> None:
     log = log_callback or (lambda _message: None)
-    ok, detail_text, detail_error = fetch_detail_text(bid.url)
+    ok, detail_text, detail_error = fetch_detail_text(bid.url, fetch_config=fetch_config)
     if not ok:
         storage.update_detail_fetch(result_id, "failed", error=detail_error)
         storage.update_ai_extraction(

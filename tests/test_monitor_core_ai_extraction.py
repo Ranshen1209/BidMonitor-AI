@@ -35,3 +35,29 @@ class MonitorCoreAIExtractionTests(unittest.TestCase):
         self.assertEqual(result["new_count"], 1)
         enrich.assert_called_once()
         self.assertEqual(enrich.call_args.args[1], 123)
+
+    @patch("src.monitor_core.Storage")
+    @patch("src.monitor_core.get_all_crawlers", return_value={})
+    @patch("src.monitor_core.get_default_sites", return_value={})
+    def test_enrichment_receives_browser_fetch_config(self, _sites, _classes, storage_cls):
+        storage = Mock(spec=Storage)
+        storage.exists.return_value = False
+        storage.save.return_value = 123
+        storage_cls.return_value = storage
+
+        monitor = MonitorCore(
+            keywords=["智能化"],
+            crawler_overrides={
+                "enabled_sites": [],
+                "use_selenium": True,
+                "browser_backend": {"mode": "browser_auto"},
+            },
+            ai_config={"enable": False},
+        )
+        monitor.crawlers = [FakeCrawler()]
+
+        with patch("src.monitor_core.enrich_new_bid") as enrich:
+            monitor.run_once()
+
+        self.assertTrue(enrich.call_args.kwargs["fetch_config"]["use_selenium"])
+        self.assertEqual(enrich.call_args.kwargs["fetch_config"]["browser_backend"]["mode"], "browser_auto")

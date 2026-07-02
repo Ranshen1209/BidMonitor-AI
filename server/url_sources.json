@@ -1,0 +1,101 @@
+{
+  "version": 1,
+  "sources": [
+    {
+      "id": "chinabidding",
+      "name": "机电产品招标投标电子交易平台",
+      "url": "https://www.chinabidding.com/",
+      "enabled": true
+    },
+    {
+      "id": "rccchina",
+      "name": "RCC瑞达恒",
+      "url": "https://www.rccchina.com/",
+      "enabled": true
+    },
+    {
+      "id": "plap",
+      "name": "军队采购网",
+      "url": "https://www.plap.mil.cn/",
+      "enabled": true
+    },
+    {
+      "id": "chnenergybidding",
+      "name": "国能e招",
+      "url": "https://www.chnenergybidding.com.cn/bidweb/",
+      "enabled": true
+    },
+    {
+      "id": "gt95306",
+      "name": "国铁采购平台",
+      "url": "https://cg.95306.cn/",
+      "enabled": true
+    },
+    {
+      "id": "bidizhaobiao",
+      "name": "比地招标网",
+      "url": "https://www.bidizhaobiao.com/",
+      "enabled": true
+    },
+    {
+      "id": "zfcg-sh",
+      "name": "上海市政府采购网",
+      "url": "https://www.zfcg.sh.gov.cn/",
+      "enabled": true
+    },
+    {
+      "id": "sdicc",
+      "name": "国投集团电子采购平台",
+      "url": "https://www.sdicc.com.cn/",
+      "enabled": true
+    },
+    {
+      "id": "ccgp",
+      "name": "中国政府采购网",
+      "url": "https://www.ccgp.gov.cn/",
+      "enabled": true
+    },
+    {
+      "id": "jiading-edu",
+      "name": "上海市嘉定区教育局",
+      "url": "https://www.jiading.gov.cn/jiaoyu",
+      "enabled": true
+    },
+    {
+      "id": "jszhaobiao",
+      "name": "建设招标网",
+      "url": "https://www.jszhaobiao.com/",
+      "enabled": true
+    },
+    {
+      "id": "okcis",
+      "name": "招标采购导航网",
+      "url": "https://www.okcis.cn/",
+      "enabled": true
+    },
+    {
+      "id": "bidcenter",
+      "name": "采招网",
+      "url": "https://www.bidcenter.com.cn/",
+      "enabled": true
+    },
+    {
+      "id": "bidchance",
+      "name": "招标网",
+      "url": "https://www.bidchance.com/",
+      "enabled": true
+    },
+    {
+      "id": "jianyu360",
+      "name": "剑鱼标讯官网",
+      "url": "https://www.jianyu360.cn/",
+      "enabled": true
+    },
+    {
+      "id": "qianlima",
+      "name": "千里马",
+      "url": "https://www.qianlima.com/",
+      "enabled": true
+    }
+  ]
+}

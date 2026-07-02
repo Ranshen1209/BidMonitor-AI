@@ -664,7 +664,8 @@ async function loadConfig() {
         document.getElementById('cfgExclude').value = currentConfig.exclude || '';
         document.getElementById('cfgMustContain').value = currentConfig.must_contain || '';
         document.getElementById('cfgInterval').value = currentConfig.interval || 20;
-        document.getElementById('cfgSelenium').checked = currentConfig.use_selenium || false;
+        const browserMode = (currentConfig.browser_backend || {}).mode;
+        document.getElementById('cfgSelenium').checked = currentConfig.use_selenium || browserMode === 'browser_auto';
     } catch (e) { console.error(e); }
 }
 
@@ -675,6 +676,8 @@ async function saveConfig() {
         currentConfig.must_contain = document.getElementById('cfgMustContain').value;
         currentConfig.interval = parseInt(document.getElementById('cfgInterval').value);
         currentConfig.use_selenium = document.getElementById('cfgSelenium').checked;
+        currentConfig.browser_backend = currentConfig.browser_backend || {};
+        currentConfig.browser_backend.mode = currentConfig.use_selenium ? 'browser_auto' : 'http';
         await apiFetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(currentConfig) });
         alert('配置已保存！');
     } catch (e) { alert('保存失败: ' + e.message); }

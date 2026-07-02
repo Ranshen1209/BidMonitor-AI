@@ -314,15 +314,30 @@ app_state = AppState()
 # 配置文件路径
 CONFIG_FILE = os.path.join(BASE_DIR, 'server', 'server_config.json')
 DEFAULT_URL_LIST_PATH = '/Users/cervine/Documents/Rule-Project/projects/opportunity-collection/output/materials/bid_related_url_list.txt'
+DEFAULT_URL_SOURCES_PATH = os.path.join(BASE_DIR, 'server', 'url_sources.json')
+DEFAULT_SITE_TOPOLOGIES_PATH = os.path.join(BASE_DIR, 'server', 'site_topologies.json')
 AUTH_DB_FILE = os.environ.get("BIDMONITOR_AUTH_DB", os.path.join(BASE_DIR, "data", "auth.db"))
 SESSION_COOKIE_NAME = "bidmonitor_session"
 COOKIE_SECURE = os.environ.get("BIDMONITOR_COOKIE_SECURE", "").lower() in ("1", "true", "yes")
 auth_storage = AuthStorage(AUTH_DB_FILE)
 
+def is_legacy_url_list_key(key: Any) -> bool:
+    return str(key).startswith('url_list_')
+
 def normalize_config(config: Dict[str, Any]) -> Dict[str, Any]:
     """补齐旧配置缺少的新字段，不覆盖用户已有值。"""
+    if isinstance(config.get('enabled_sites'), list):
+        config['enabled_sites'] = [
+            key for key in config['enabled_sites']
+            if not is_legacy_url_list_key(key)
+        ]
     if not isinstance(config.get('site_metadata'), dict):
         config['site_metadata'] = {}
+    else:
+        config['site_metadata'] = {
+            key: value for key, value in config['site_metadata'].items()
+            if not is_legacy_url_list_key(key)
+        }
     if not isinstance(config.get('non_follow_reason_tags'), list):
         config['non_follow_reason_tags'] = DEFAULT_NON_FOLLOW_REASON_TAGS.copy()
     ai_config = config.setdefault('ai_config', {})
@@ -330,8 +345,14 @@ def normalize_config(config: Dict[str, Any]) -> Dict[str, Any]:
         base_url = (ai_config.get('base_url') or '').rstrip('/').lower()
         ai_config['endpoint_type'] = 'chat_completions' if base_url.endswith('/chat/completions') else 'responses'
     for source in config.get('csv_url_sources', []):
+        if source.get('file_path') == DEFAULT_URL_LIST_PATH:
+            source['name'] = '招标URL源'
+            source['file_path'] = DEFAULT_URL_SOURCES_PATH
+            source['source_type'] = 'json'
         source.setdefault('domain_delay', 2)
         source.setdefault('auth_cookies', [])
+        if str(source.get('file_path', '')).endswith('.json'):
+            source.setdefault('source_type', 'json')
     config.pop('custom_sites', None)
     return config
 
@@ -381,12 +402,14 @@ def load_config() -> Dict[str, Any]:
             'cloakbrowser_enabled': False,
             'note': '仅支持授权 Cookie、人工验证码处理、限频和普通浏览器渲染；不内置隐身绕过能力。'
         },
+        'site_topologies_path': DEFAULT_SITE_TOPOLOGIES_PATH,
         'non_follow_reason_tags': DEFAULT_NON_FOLLOW_REASON_TAGS.copy(),
         'site_metadata': {},
         'csv_url_sources': [
             {
-                'name': '上海招投标URL清单',
-                'file_path': DEFAULT_URL_LIST_PATH,
+                'name': '招标URL源',
+                'source_type': 'json',
+                'file_path': DEFAULT_URL_SOURCES_PATH,
                 'enabled': True,
                 'domain_delay': 2,
                 'auth_cookies': []
@@ -473,6 +496,8 @@ class ConfigModel(BaseModel):
     wechat_enabled: Optional[bool] = None
     ai_enabled: Optional[bool] = None
     use_selenium: Optional[bool] = None  # Selenium浏览器模式开关
+    browser_backend: Optional[Dict[str, Any]] = None
+    site_topologies_path: Optional[str] = None
 
 class LoginRequest(BaseModel):
     username: str
@@ -577,7 +602,7 @@ def build_site_response(key: str, info: Dict[str, Any], enabled_sites: List[str]
 def parse_sites_update_payload(payload: Any) -> Dict[str, Any]:
     """兼容旧 List[str]、新 {'sites': [...]} 和直接 List[Dict]。"""
     if isinstance(payload, list) and all(isinstance(item, str) for item in payload):
-        return {'enabled_sites': payload, 'site_metadata': None}
+        return {'enabled_sites': [item for item in payload if not is_legacy_url_list_key(item)], 'site_metadata': None}
 
     site_items = payload.get('sites') if isinstance(payload, dict) else payload
     if not isinstance(site_items, list):
@@ -589,6 +614,8 @@ def parse_sites_update_payload(payload: Any) -> Dict[str, Any]:
         if not isinstance(item, dict) or not item.get('key'):
             continue
         key = str(item['key'])
+        if is_legacy_url_list_key(key):
+            continue
         if item.get('enabled'):
             enabled_sites.append(key)
         sanitized = sanitize_site_metadata(item)
@@ -640,6 +667,8 @@ async def run_monitor_task():
             crawler_overrides={
                 'enabled_sites': config.get('enabled_sites', []),
                 'use_selenium': config.get('use_selenium', False),
+                'browser_backend': config.get('browser_backend', {}),
+                'site_topologies_path': config.get('site_topologies_path', DEFAULT_SITE_TOPOLOGIES_PATH),
                 'csv_url_sources': config.get('csv_url_sources', []),
                 'site_metadata': config.get('site_metadata', {}),
             }

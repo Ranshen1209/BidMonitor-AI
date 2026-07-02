@@ -34,6 +34,11 @@ except ImportError:  # pragma: no cover - exercised through import-time tests
     requests = _RequestsFallback()
 
 from .base import BaseCrawler, BidInfo
+from .source_registry import load_url_sources
+
+DEFAULT_SITE_TOPOLOGIES_PATH = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "server", "site_topologies.json")
+)
 
 
 BLOCKED_SIGNS = [
@@ -327,9 +332,21 @@ class UrlListCrawler(BaseCrawler):
         )
         self.log_callback = config.get("log_callback")
         self.max_links_per_page = int(config.get("url_list_max_links_per_page", 50))
+        self.topology_max_depth = int(source_config.get("topology_max_depth", config.get("topology_max_depth", 3)))
+        self.max_follow_links_per_page = int(
+            source_config.get("max_follow_links_per_page", config.get("max_follow_links_per_page", 80))
+        )
+        self.max_detail_pages_per_seed = int(
+            source_config.get("max_detail_pages_per_seed", config.get("max_detail_pages_per_seed", 50))
+        )
         self.domain_delay = float(source_config.get("domain_delay", config.get("domain_delay", 0)))
         self.auth_cookies = source_config.get("auth_cookies", config.get("auth_cookies", []))
         self._last_domain_request_at: Dict[str, float] = {}
+        self.site_topologies = self._load_site_topologies(
+            source_config.get("site_topologies_path")
+            or config.get("site_topologies_path")
+            or DEFAULT_SITE_TOPOLOGIES_PATH
+        )
         super().__init__(config)
 
     @property
@@ -344,6 +361,10 @@ class UrlListCrawler(BaseCrawler):
         ext = os.path.splitext(self.file_path)[1].lower()
         if ext == ".csv":
             raw_urls = self._read_csv_urls()
+        elif ext == ".json" or self.source_config.get("source_type") in {"json", "bookmarks_html"}:
+            raw_urls = [source.url for source in load_url_sources(self.file_path)]
+        elif ext in {".html", ".htm"}:
+            raw_urls = [source.url for source in load_url_sources(self.file_path)]
         else:
             raw_urls = self._read_txt_urls()
 
@@ -386,8 +407,35 @@ class UrlListCrawler(BaseCrawler):
                     continue
 
                 self._respect_rate_limit(url)
-                html, status_code, status_text = self._request_url(url)
+                browser_first = self._prefers_browser_fetch(url)
+                browser_result = self._request_url_with_browser(url) if browser_first else None
+                if browser_result:
+                    html, status_code, status_text = browser_result
+                else:
+                    try:
+                        html, status_code, status_text = self._request_url(url)
+                    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.RequestException):
+                        if not self._browser_mode_enabled():
+                            raise
+                        browser_result = self._request_url_with_browser(url)
+                        if not browser_result:
+                            raise
+                        html, status_code, status_text = browser_result
                 if status_code in (401, 403):
+                    seed_bids = self._try_topology_seed_fallback(url, timestamp, rule, cookie_used)
+                    if seed_bids:
+                        all_bids.extend(seed_bids)
+                        self._record_diagnostic(
+                            url,
+                            "success",
+                            f"入口 HTTP {status_code}，已按站点拓扑种子继续并生成 {len(seed_bids)} 条 BidInfo",
+                            timestamp,
+                            status_code,
+                            item_count=len(seed_bids),
+                            cookie_used=cookie_used,
+                            rule=rule,
+                        )
+                        continue
                     self._record_diagnostic(
                         url,
                         "failed",
@@ -399,6 +447,20 @@ class UrlListCrawler(BaseCrawler):
                     )
                     continue
                 if status_code == 404 or status_code >= 500:
+                    seed_bids = self._try_topology_seed_fallback(url, timestamp, rule, cookie_used)
+                    if seed_bids:
+                        all_bids.extend(seed_bids)
+                        self._record_diagnostic(
+                            url,
+                            "success",
+                            f"入口 HTTP {status_code}，已按站点拓扑种子继续并生成 {len(seed_bids)} 条 BidInfo",
+                            timestamp,
+                            status_code,
+                            item_count=len(seed_bids),
+                            cookie_used=cookie_used,
+                            rule=rule,
+                        )
+                        continue
                     self._record_diagnostic(
                         url,
                         "failed",
@@ -409,8 +471,22 @@ class UrlListCrawler(BaseCrawler):
                         rule=rule,
                     )
                     continue
-                if self._contains_blocked_sign(html):
-                    blocked_reason = self._blocked_reason(html)
+                if self._contains_blocked_sign(html, url):
+                    blocked_reason = self._blocked_reason(html, url)
+                    seed_bids = self._try_topology_seed_fallback(url, timestamp, rule, cookie_used)
+                    if seed_bids:
+                        all_bids.extend(seed_bids)
+                        self._record_diagnostic(
+                            url,
+                            "success",
+                            f"入口受限（{blocked_reason}），已按站点拓扑种子继续并生成 {len(seed_bids)} 条 BidInfo",
+                            timestamp,
+                            status_code,
+                            item_count=len(seed_bids),
+                            cookie_used=cookie_used,
+                            rule=rule,
+                        )
+                        continue
                     self._record_diagnostic(
                         url,
                         "failed",
@@ -422,7 +498,7 @@ class UrlListCrawler(BaseCrawler):
                     )
                     continue
 
-                bids = self._parse_page(html, url, timestamp)
+                bids = self._crawl_topology_from_url(url, html, timestamp, rule, cookie_used)
                 if not bids:
                     self._record_diagnostic(
                         url,
@@ -448,6 +524,20 @@ class UrlListCrawler(BaseCrawler):
                 )
                 self.logger.info(f"[{self.name}] OK {url} -> {len(bids)} item(s)")
             except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as exc:
+                rule = locals().get("rule") or self._classify_url(url)
+                seed_bids = self._try_topology_seed_fallback(url, timestamp, rule, cookie_used)
+                if seed_bids:
+                    all_bids.extend(seed_bids)
+                    self._record_diagnostic(
+                        url,
+                        "success",
+                        f"入口请求异常（{exc.__class__.__name__}），已按站点拓扑种子继续并生成 {len(seed_bids)} 条 BidInfo",
+                        timestamp,
+                        item_count=len(seed_bids),
+                        cookie_used=cookie_used,
+                        rule=rule,
+                    )
+                    continue
                 self._record_diagnostic(
                     url,
                     "failed",
@@ -458,6 +548,20 @@ class UrlListCrawler(BaseCrawler):
                 )
                 self.logger.warning(f"[{self.name}] Network failed {url}: {exc}")
             except requests.RequestException as exc:
+                rule = locals().get("rule") or self._classify_url(url)
+                seed_bids = self._try_topology_seed_fallback(url, timestamp, rule, cookie_used)
+                if seed_bids:
+                    all_bids.extend(seed_bids)
+                    self._record_diagnostic(
+                        url,
+                        "success",
+                        f"入口请求异常（{exc.__class__.__name__}），已按站点拓扑种子继续并生成 {len(seed_bids)} 条 BidInfo",
+                        timestamp,
+                        item_count=len(seed_bids),
+                        cookie_used=cookie_used,
+                        rule=rule,
+                    )
+                    continue
                 self._record_diagnostic(
                     url,
                     "failed",
@@ -480,6 +584,214 @@ class UrlListCrawler(BaseCrawler):
 
         self.logger.info(f"[{self.name}] URL list crawl done, got {len(all_bids)} item(s)")
         return all_bids
+
+    def _try_topology_seed_fallback(
+        self,
+        url: str,
+        timestamp: str,
+        rule: Dict[str, str],
+        cookie_used: bool,
+    ) -> List[BidInfo]:
+        if not self._topology_seed_links(url):
+            return []
+        return self._crawl_topology_from_url(url, "", timestamp, rule, cookie_used)
+
+    def _crawl_topology_from_url(
+        self,
+        seed_url: str,
+        seed_html: str,
+        timestamp: str,
+        seed_rule: Dict[str, str],
+        cookie_used: bool = False,
+    ) -> List[BidInfo]:
+        bids: List[BidInfo] = []
+        queue: List[Tuple[str, int, Optional[str], str]] = [(seed_url, 0, seed_html, "")]
+        visited: set[str] = set()
+
+        while queue and len(bids) < self.max_detail_pages_per_seed:
+            page_url, depth, prefetched_html, expected_title = queue.pop(0)
+            normalized_url = page_url.split("#", 1)[0]
+            if normalized_url in visited:
+                continue
+            visited.add(normalized_url)
+
+            if prefetched_html is None:
+                browser_first = self._prefers_browser_fetch(page_url)
+                browser_result = self._request_url_with_browser(page_url) if browser_first else None
+                if browser_result:
+                    html, status_code, _status_text = browser_result
+                else:
+                    try:
+                        self._respect_rate_limit(page_url)
+                        html, status_code, _status_text = self._request_url(page_url)
+                    except Exception as exc:
+                        if self._browser_mode_enabled():
+                            browser_result = self._request_url_with_browser(page_url)
+                            if browser_result:
+                                html, status_code, _status_text = browser_result
+                            else:
+                                self.logger.debug(f"[{self.name}] topology browser fallback failed {page_url}: {exc}")
+                                continue
+                        else:
+                            self.logger.debug(f"[{self.name}] topology fetch failed {page_url}: {exc}")
+                            continue
+                if status_code >= 400 or self._contains_blocked_sign(html, page_url):
+                    if self._browser_mode_enabled():
+                        browser_result = self._request_url_with_browser(page_url)
+                        if browser_result:
+                            html, status_code, _status_text = browser_result
+                        else:
+                            continue
+                    else:
+                        continue
+            else:
+                html = prefetched_html
+
+            parsed_bids = self._parse_page(html, page_url, timestamp)
+            if self._browser_mode_enabled() and not self._has_topology_progress(parsed_bids, page_url):
+                browser_result = self._request_url_with_browser(page_url)
+                if browser_result:
+                    browser_html, browser_status, _browser_text = browser_result
+                    if browser_status < 400 and not self._contains_blocked_sign(browser_html, page_url):
+                        html = browser_html
+                        parsed_bids = self._parse_page(html, page_url, timestamp)
+            detail_bids: List[BidInfo] = []
+            candidate_links: List[Dict[str, str]] = []
+
+            for bid in parsed_bids:
+                if bid.url == page_url and self._is_admissible_detail_bid(bid, page_url):
+                    if self._should_use_candidate_title(bid.title, expected_title, page_url):
+                        bid.title = expected_title
+                    detail_bids.append(bid)
+                    continue
+                if bid.url != page_url:
+                    candidate_links.append({"title": bid.title, "url": bid.url})
+
+            for detail_bid in detail_bids:
+                if len(bids) >= self.max_detail_pages_per_seed:
+                    break
+                bids.append(detail_bid)
+
+            if depth >= self.topology_max_depth:
+                continue
+
+            candidate_links = self._merge_candidate_links(
+                candidate_links,
+                self._extract_candidate_links_from_html(html, page_url),
+            )
+            if depth == 0:
+                candidate_links = self._merge_candidate_links(self._topology_seed_links(seed_url), candidate_links)
+            for link in candidate_links[: self.max_follow_links_per_page]:
+                candidate_url = link.get("url", "")
+                if not candidate_url or candidate_url.split("#", 1)[0] in visited:
+                    continue
+                if not self._should_follow_candidate(page_url, candidate_url, depth):
+                    continue
+                queue.append((candidate_url, depth + 1, None, link.get("title", "")))
+
+        return bids
+
+    def _merge_candidate_links(self, *groups: List[Dict[str, str]]) -> List[Dict[str, str]]:
+        merged: List[Dict[str, str]] = []
+        seen: set[str] = set()
+        for group in groups:
+            for link in group or []:
+                url = (link.get("url") or "").split("#", 1)[0]
+                if not url or url in seen:
+                    continue
+                seen.add(url)
+                merged.append(link)
+        return merged
+
+    def _has_topology_progress(self, parsed_bids: List[BidInfo], page_url: str) -> bool:
+        for bid in parsed_bids:
+            if bid.url != page_url:
+                return True
+            if self._is_admissible_detail_bid(bid, page_url):
+                return True
+        return False
+
+    def _load_site_topologies(self, path: str) -> List[Dict[str, Any]]:
+        if not path or not os.path.exists(path):
+            return []
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+        except Exception as exc:
+            self.logger.warning(f"[{self.name}] Failed to load site topologies {path}: {exc}")
+            return []
+        records = payload.get("sites") if isinstance(payload, dict) else payload
+        if not isinstance(records, list):
+            return []
+        return [record for record in records if isinstance(record, dict)]
+
+    def _topology_for_url(self, url: str) -> Optional[Dict[str, Any]]:
+        parsed = urlparse(url)
+        host = parsed.netloc.lower().split(":")[0]
+        if not host:
+            return None
+        best: Optional[Dict[str, Any]] = None
+        best_score = -1
+        for topology in self.site_topologies:
+            hosts = self._topology_allowed_hosts(topology)
+            score = 0
+            if any(self._host_matches(host, allowed) for allowed in hosts):
+                score = 1
+            entry_host = urlparse(str(topology.get("entry_url", ""))).netloc.lower().split(":")[0]
+            if entry_host and host == entry_host:
+                score = 3
+            if score > best_score:
+                best = topology
+                best_score = score
+        return best if best_score > 0 else None
+
+    def _topology_allowed_hosts(self, topology: Dict[str, Any]) -> List[str]:
+        hosts = [str(host).lower() for host in topology.get("allowed_hosts", []) if host]
+        for key in ("entry_url", "url"):
+            entry_host = urlparse(str(topology.get(key, ""))).netloc.lower().split(":")[0]
+            if entry_host:
+                hosts.append(entry_host)
+        return list(dict.fromkeys(hosts))
+
+    def _host_matches(self, host: str, allowed: str) -> bool:
+        allowed = allowed.lower().strip()
+        if not allowed:
+            return False
+        if allowed.startswith("*."):
+            suffix = allowed[1:]
+            return host.endswith(suffix)
+        return host == allowed
+
+    def _is_allowed_topology_host(self, source_url: str, candidate_url: str) -> bool:
+        source_host = urlparse(source_url).netloc.lower().split(":")[0]
+        candidate_host = urlparse(candidate_url).netloc.lower().split(":")[0]
+        if not source_host or not candidate_host:
+            return False
+        if source_host == candidate_host:
+            return True
+        topology = self._topology_for_url(source_url) or self._topology_for_url(candidate_url)
+        if not topology:
+            return False
+        allowed_hosts = self._topology_allowed_hosts(topology)
+        return any(self._host_matches(source_host, allowed) for allowed in allowed_hosts) and any(
+            self._host_matches(candidate_host, allowed) for allowed in allowed_hosts
+        )
+
+    def _topology_seed_links(self, seed_url: str) -> List[Dict[str, str]]:
+        topology = self._topology_for_url(seed_url)
+        if not topology:
+            return []
+        links: List[Dict[str, str]] = []
+        for raw_url in topology.get("seed_urls", []) or []:
+            if not raw_url:
+                continue
+            if "{" in str(raw_url) or "}" in str(raw_url):
+                continue
+            url = urljoin(seed_url, str(raw_url))
+            if url.rstrip("/") == seed_url.rstrip("/"):
+                continue
+            links.append({"title": str(raw_url), "url": url})
+        return links
 
     def _read_txt_urls(self) -> List[str]:
         with open(self.file_path, "r", encoding="utf-8-sig") as f:
@@ -543,6 +855,50 @@ class UrlListCrawler(BaseCrawler):
         response.encoding = response.apparent_encoding or response.encoding or "utf-8"
         return response.text, response.status_code, response.reason
 
+    def _request_url_with_browser(self, url: str) -> Optional[Tuple[str, int, str]]:
+        try:
+            from crawler.browser import create_browser_crawler
+        except Exception as exc:
+            self.logger.debug(f"[{self.name}] browser backend import failed: {exc}")
+            return None
+
+        crawler = create_browser_crawler(self.config, self.name, url, headless=True)
+        if crawler is None:
+            return None
+        html = crawler.fetch(url)
+        if not html:
+            return None
+        return html, 200, "Browser"
+
+    def _browser_mode_enabled(self) -> bool:
+        browser_backend = self.config.get("browser_backend") or {}
+        mode = browser_backend.get("mode")
+        return bool(self.config.get("use_selenium") or mode in {"browser_auto", "browser", "browser_cloak", "browser_selenium"})
+
+    def _prefers_browser_fetch(self, url: str) -> bool:
+        if not self._browser_mode_enabled():
+            return False
+        browser_backend = self.config.get("browser_backend") or {}
+        if browser_backend.get("mode") in {"browser_auto", "browser", "browser_cloak", "browser_selenium"}:
+            return True
+        topology = self._topology_for_url(url)
+        preferred_fetch = str((topology or {}).get("preferred_fetch", "")).lower()
+        return "browser" in preferred_fetch
+
+    def _fetch_and_extract_candidate_links(self, url: str, timestamp: str, cookie_used: bool = False) -> List[Dict[str, str]]:
+        self._respect_rate_limit(url)
+        html, status_code, _status_text = self._request_url(url)
+        links: List[Dict[str, str]] = []
+        if status_code < 400 and not self._contains_blocked_sign(html, url):
+            links = self._extract_candidate_links_from_html(html, url)
+        if not links and self._browser_mode_enabled():
+            browser_result = self._request_url_with_browser(url)
+            if browser_result:
+                browser_html, browser_status, _browser_text = browser_result
+                if browser_status < 400 and not self._contains_blocked_sign(browser_html, url):
+                    links = self._extract_candidate_links_from_html(browser_html, url)
+        return links[: self.max_follow_links_per_page]
+
     def _get_cookie_for_url(self, url: str) -> Optional[str]:
         host = urlparse(url).netloc.lower().split(":")[0]
         for item in self.auth_cookies:
@@ -587,6 +943,9 @@ class UrlListCrawler(BaseCrawler):
         if link_bids and rule["page_type"] != "detail":
             return link_bids
 
+        if rule["page_type"] != "detail":
+            return []
+
         title = self._extract_title(soup, page_url)
         content = self._extract_content_summary(soup)
         if not title and not content:
@@ -605,6 +964,255 @@ class UrlListCrawler(BaseCrawler):
             )
         ]
 
+    def _extract_candidate_links_from_html(self, html: str, page_url: str) -> List[Dict[str, str]]:
+        soup = self._parse_html_document(html)
+        rule = self._classify_url(page_url)
+        candidates: List[Dict[str, str]] = []
+        seen: set[str] = set()
+        for bid in self._extract_announcement_links(soup, page_url, datetime.now().isoformat(timespec="seconds"), rule):
+            if bid.url in seen:
+                continue
+            seen.add(bid.url)
+            candidates.append({"title": bid.title, "url": bid.url})
+
+        for a in soup.find_all("a", href=True):
+            text = a.get_text(" ", strip=True)
+            href = a.get("href", "").strip()
+            if not href or href.lower().startswith(("javascript:", "mailto:", "tel:", "#")):
+                continue
+            full_url = urljoin(page_url, href)
+            if full_url in seen:
+                continue
+            if self._is_traversal_link(text, full_url, page_url):
+                seen.add(full_url)
+                candidates.append({"title": text or full_url, "url": full_url})
+        for link in self._extract_topology_attribute_links(html, page_url):
+            if link["url"] in seen:
+                continue
+            seen.add(link["url"])
+            candidates.append(link)
+        return candidates
+
+    def _extract_topology_attribute_links(self, html: str, page_url: str) -> List[Dict[str, str]]:
+        topology = self._topology_for_url(page_url)
+        if not topology or not html:
+            return []
+        candidates: List[Dict[str, str]] = []
+        seen: set[str] = set()
+        attr_re = re.compile(
+            r"(?P<attr>href|rec_link|data-url|data-href)\s*=\s*['\"](?P<url>[^'\"]+)['\"]",
+            re.IGNORECASE,
+        )
+        title_re = re.compile(
+            r"(?:rec_title|title|data-title)\s*=\s*['\"](?P<title>[^'\"]+)['\"]",
+            re.IGNORECASE,
+        )
+        for match in attr_re.finditer(html):
+            raw_url = match.group("url").strip()
+            if not raw_url or raw_url.lower().startswith(("javascript:", "mailto:", "tel:", "#")):
+                continue
+            full_url = urljoin(page_url, raw_url)
+            if full_url in seen or not self._is_allowed_topology_host(page_url, full_url):
+                continue
+            if not self._classify_url_by_topology(full_url, topology) and not self._is_traversal_link("", full_url, page_url):
+                continue
+            tag_start = html.rfind("<", 0, match.start())
+            tag_end = html.find(">", match.end())
+            tag_text = html[tag_start:tag_end + 1] if tag_start >= 0 and tag_end >= 0 else ""
+            title_match = title_re.search(tag_text)
+            title = title_match.group("title").strip() if title_match else full_url
+            seen.add(full_url)
+            candidates.append({"title": title, "url": full_url})
+        for match in re.finditer(
+            r"urlChange\(\s*['\"](?P<gg>[^'\"]+)['\"]\s*,\s*['\"](?P<gc>[^'\"]+)['\"]\s*\)",
+            html,
+            re.IGNORECASE,
+        ):
+            detail_url = urljoin(page_url, f"/cgxx/ggDetail?gcGuid={match.group('gc')}&ggGuid={match.group('gg')}")
+            if detail_url in seen or not self._is_allowed_topology_host(page_url, detail_url):
+                continue
+            if not self._classify_url_by_topology(detail_url, topology):
+                continue
+            title = self._text_near_html_match(html, match.start(), match.end()) or detail_url
+            seen.add(detail_url)
+            candidates.append({"title": title, "url": detail_url})
+        for match in re.finditer(
+            r"noticeDetail\(\s*['\"](?P<id>[A-Za-z0-9_-]+)['\"]\s*\)",
+            html,
+            re.IGNORECASE,
+        ):
+            detail_url = urljoin(page_url, f"/baseinfor/notice/informationShow?id={match.group('id')}")
+            if detail_url in seen or not self._is_allowed_topology_host(page_url, detail_url):
+                continue
+            if not self._classify_url_by_topology(detail_url, topology):
+                continue
+            title = self._text_near_html_match(html, match.start(), match.end()) or detail_url
+            seen.add(detail_url)
+            candidates.append({"title": title, "url": detail_url})
+        for match in re.finditer(r"['\"](?P<url>https?://[^'\"]+)['\"]", html, re.IGNORECASE):
+            full_url = match.group("url").strip()
+            if full_url in seen or not self._is_allowed_topology_host(page_url, full_url):
+                continue
+            if not self._classify_url_by_topology(full_url, topology):
+                continue
+            title = self._title_near_json_url(html, match.start(), match.end()) or full_url
+            seen.add(full_url)
+            candidates.append({"title": title, "url": full_url})
+        return candidates
+
+    def _text_near_html_match(self, html: str, start: int, end: int) -> str:
+        tag_start = html.rfind("<", 0, start)
+        tag_end = html.find(">", end)
+        if tag_start < 0 or tag_end < 0:
+            return ""
+        snippet = html[tag_start:tag_end + 1]
+        text = re.sub(r"<[^>]+>", " ", snippet)
+        return self._normalize_space(text)
+
+    def _title_near_json_url(self, html: str, start: int, end: int) -> str:
+        window = html[max(0, start - 500):min(len(html), end + 500)]
+        for pattern in [
+            r"['\"]title['\"]\s*:\s*['\"]([^'\"]+)['\"]",
+            r"['\"]noticeTitle['\"]\s*:\s*['\"]([^'\"]+)['\"]",
+            r"['\"]projectName['\"]\s*:\s*['\"]([^'\"]+)['\"]",
+        ]:
+            match = re.search(pattern, window, re.IGNORECASE)
+            if match:
+                return self._normalize_space(match.group(1))
+        return ""
+
+    def _is_traversal_link(self, text: str, url: str, page_url: str) -> bool:
+        parsed = urlparse(url)
+        seed = urlparse(page_url)
+        if parsed.netloc and seed.netloc and not self._is_allowed_topology_host(page_url, url):
+            return False
+        lowered = f"{parsed.path.lower()}?{parsed.query.lower()}"
+        if self._is_detail_url(parsed.path.lower(), parsed.query.lower()):
+            return True
+        if any(term in lowered for term in ["/search", "keyword", "category", "/list", "/notice", "/cggg/", "/zb", "/bidweb", "/cgxx"]):
+            return True
+        if any(term in (text or "") for term in ["招标", "采购", "公告", "中标", "结果", "项目", "工程", "安防", "弱电", "监控"]):
+            return not any(keyword in text.lower() for keyword in NEGATIVE_LINK_KEYWORDS)
+        return any(keyword in text for keyword in BID_LINK_KEYWORDS) and not any(
+            keyword in text.lower() for keyword in NEGATIVE_LINK_KEYWORDS
+        )
+
+    def _should_follow_candidate(self, page_url: str, candidate_url: str, depth: int) -> bool:
+        parsed = urlparse(candidate_url)
+        current = urlparse(page_url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            return False
+        if not self._is_allowed_topology_host(page_url, candidate_url):
+            return False
+        rule = self._classify_url(candidate_url)
+        if rule.get("page_type") == "login" or rule.get("handling") == "requires_login":
+            return False
+        return rule.get("page_type") in {"detail", "list", "search", "home"} or depth + 1 <= self.topology_max_depth
+
+    def _is_admissible_detail_bid(self, bid: BidInfo, page_url: str) -> bool:
+        rule = self._classify_url(page_url)
+        text = self._normalize_space(f"{bid.title} {bid.content}")
+        if self._contains_blocked_sign(text, page_url):
+            return False
+        if self._looks_like_navigation_page(text):
+            return False
+        if rule.get("page_type") != "detail":
+            return False
+        if rule.get("page_type") == "detail":
+            return self._has_detail_evidence(text, allow_minimal=True)
+        return False
+
+    def _should_use_candidate_title(self, current_title: str, candidate_title: str, page_url: str) -> bool:
+        candidate_title = self._normalize_space(candidate_title)
+        current_title = self._normalize_space(current_title)
+        if len(candidate_title) < 6 or not self._has_strong_bid_stage(candidate_title):
+            return False
+        if not current_title or current_title == page_url or self._looks_like_url(current_title):
+            return True
+        if self._has_strong_bid_stage(current_title):
+            return False
+        return True
+
+    def _has_strong_bid_stage(self, text: str) -> bool:
+        return any(
+            keyword in text
+            for keyword in [
+                "公开招标",
+                "招标公告",
+                "采购公告",
+                "中标公告",
+                "成交公告",
+                "结果公告",
+                "更正公告",
+                "竞争性磋商",
+                "竞争性谈判",
+                "询价公告",
+                "采购意向",
+            ]
+        )
+
+    def _has_detail_evidence(self, text: str, allow_minimal: bool = False) -> bool:
+        if not text:
+            return False
+        title_signal = any(keyword in text for keyword in BID_LINK_KEYWORDS)
+        field_signals = [
+            "发布时间",
+            "发布日期",
+            "采购单位",
+            "采购人",
+            "招标人",
+            "项目编号",
+            "项目名称",
+            "预算金额",
+            "公告正文",
+            "正文内容",
+            "投标截止",
+            "开标时间",
+        ]
+        field_count = sum(1 for field in field_signals if field in text)
+        if title_signal and field_count >= 2:
+            return True
+        if not allow_minimal or not title_signal:
+            return False
+
+        stage_signal = self._has_strong_bid_stage(text)
+        subject_signal = any(
+            keyword in text
+            for keyword in [
+                "本项目",
+                "项目",
+                "工程",
+                "系统",
+                "设备",
+                "服务",
+                "预算",
+                "安防",
+                "监控",
+                "门禁",
+                "弱电",
+                "智能化",
+                "综合布线",
+            ]
+        )
+        return stage_signal and subject_signal and len(text) >= 12
+
+    def _looks_like_navigation_page(self, text: str) -> bool:
+        nav_terms = [
+            "首页",
+            "招标中心",
+            "项目中心",
+            "数据中心",
+            "服务中心",
+            "高级搜索",
+            "热点搜索",
+            "上一页",
+            "下一页",
+            "尾页",
+            "共",
+            "搜索",
+        ]
+        return sum(1 for term in nav_terms if term in text) >= 4
+
     def _parse_html_document(self, html: str):
         try:
             return self.parse_html(html)
@@ -618,6 +1226,7 @@ class UrlListCrawler(BaseCrawler):
         query = parsed.query.lower()
         fragment = parsed.fragment.lower()
         host_key = host[4:] if host.startswith("www.") else host
+        topology = self._topology_for_url(url)
 
         platform_map = {
             "zfcg.sh.gov.cn": "上海政府采购",
@@ -669,7 +1278,9 @@ class UrlListCrawler(BaseCrawler):
             "cooperation.ceic.com": "国家能源集团生态协作平台",
             "sxtsrm.sngbs.com.cn": "陕西天然气 SRM",
         }
-        platform = platform_map.get(host_key, platform_map.get(host, host or "未知平台"))
+        platform = str(topology.get("name")) if topology and topology.get("name") else platform_map.get(
+            host_key, platform_map.get(host, host or "未知平台")
+        )
 
         handling = "public_crawl"
         reason = "公开页面，按 URL 清单通用规则抓取公告链接或详情"
@@ -692,7 +1303,10 @@ class UrlListCrawler(BaseCrawler):
             handling = "js_rendered_limited"
             reason = "行业电子采购平台可能依赖前端渲染；静态可见内容优先，失败则诊断"
 
-        if self._is_api_url(path, query):
+        topology_page_type = self._classify_url_by_topology(url, topology)
+        if topology_page_type:
+            page_type = topology_page_type
+        elif self._is_api_url(path, query):
             page_type = "api"
         elif self._is_login_url(path, query):
             page_type = "login"
@@ -712,7 +1326,37 @@ class UrlListCrawler(BaseCrawler):
             "page_type": page_type,
             "handling": handling,
             "reason": reason,
+            "topology_id": str(topology.get("id", "")) if topology else "",
         }
+
+    def _classify_url_by_topology(self, url: str, topology: Optional[Dict[str, Any]]) -> Optional[str]:
+        if not topology:
+            return None
+        if self._matches_any_pattern(url, topology.get("detail_url_regex")):
+            return "detail"
+        if self._matches_any_pattern(url, topology.get("list_url_regex")):
+            return "list"
+        if self._matches_any_pattern(url, topology.get("search_url_regex")):
+            return "search"
+        return None
+
+    def _matches_any_pattern(self, value: str, patterns: Any) -> bool:
+        if isinstance(patterns, str):
+            patterns = [patterns]
+        if not isinstance(patterns, list):
+            return False
+        parsed = urlparse(value)
+        targets = [value, parsed.path, f"{parsed.path}?{parsed.query}" if parsed.query else parsed.path]
+        for pattern in patterns:
+            if not pattern:
+                continue
+            try:
+                compiled = re.compile(str(pattern), re.IGNORECASE)
+            except re.error:
+                continue
+            if any(compiled.search(target) for target in targets):
+                return True
+        return False
 
     def _is_api_url(self, path: str, query: str) -> bool:
         return "/api/" in path or path.endswith(".json") or "format=json" in query
@@ -722,7 +1366,27 @@ class UrlListCrawler(BaseCrawler):
         return any(term in path for term in login_terms) or "response_type=code" in query
 
     def _is_detail_url(self, path: str, query: str) -> bool:
-        detail_terms = ["/detail", "articleid=", "bid-", "news-", "/t20", ".htm", ".html"]
+        filename = os.path.basename(path.rstrip("/"))
+        if filename in {"index.htm", "index.html", "notice.html", "list.html", "search.html"}:
+            return False
+        if re.match(r"index_\d+\.html?$", filename):
+            return False
+        detail_terms = [
+            "/detail",
+            "articledetail",
+            "articleid=",
+            "informationshow",
+            "ggdetail",
+            "noticedetail",
+            "notice-detail",
+            "result-detail",
+            "bid-",
+            "news-",
+            "/info-",
+            "/t20",
+            ".htm",
+            ".html",
+        ]
         if path in ("", "/", "/index.html"):
             return False
         return any(term in f"{path}?{query}" for term in detail_terms)
@@ -732,7 +1396,23 @@ class UrlListCrawler(BaseCrawler):
         return any(term in search_text for term in ["search", "keyword", "keywords", "customdessearch", "bidding"])
 
     def _is_list_url(self, path: str) -> bool:
-        list_terms = ["/cggg/", "/tzgg/", "/gg", "/bidweb", "/projects", "/zby", "/notice", "/list"]
+        list_terms = [
+            "/cggg/",
+            "/tzgg/",
+            "/gg",
+            "/bidweb",
+            "/projects",
+            "/zby",
+            "/notice",
+            "/list",
+            "/zbgg",
+            "/zbmf",
+            "/zbpage",
+            "/site/category",
+            "/baseinfor/notice/tobuynoticemore",
+            "/cgxx/cgxxlist",
+            "/freecms-glht/",
+        ]
         return any(term in path for term in list_terms)
 
     def _should_skip_before_fetch(self, rule: Dict[str, str]) -> bool:
@@ -1124,21 +1804,68 @@ class UrlListCrawler(BaseCrawler):
             return f"{metadata}\n{content}"
         return metadata
 
-    def _contains_blocked_sign(self, html: str) -> bool:
-        html_lower = html.lower()
-        return any(sign.lower() in html_lower for sign in BLOCKED_SIGNS)
+    def _contains_blocked_sign(self, html: str, url: str = "") -> bool:
+        return bool(self._matched_blocked_sign(html, url))
 
-    def _blocked_reason(self, html: str) -> str:
-        html_lower = html.lower()
-        if any(sign in html_lower for sign in ["captcha", "验证码", "安全验证", "滑块验证", "人机验证"]):
+    def _blocked_reason(self, html: str, url: str = "") -> str:
+        matched_sign = self._matched_blocked_sign(html, url)
+        signal_text = f"{self._visible_text_for_blocking(html).lower()} {matched_sign.lower()}"
+        if any(sign in signal_text for sign in ["captcha", "验证码", "安全验证", "滑块验证", "人机验证"]):
             return "页面包含验证码/安全验证组件: 需要人工验证或授权 Cookie；不自动绕过验证码"
-        if any(sign in html_lower for sign in ["access denied", "forbidden", "访问被拒绝", "请求被禁止", "ip被封"]):
+        if any(sign in signal_text for sign in ["access denied", "forbidden", "访问被拒绝", "请求被禁止", "ip被封"]):
             return "页面包含访问拒绝/Forbidden/IP 限制提示: 疑似反爬或访问限制"
-        if any(sign in html_lower for sign in ["请先登录", "请登录后", "登录后查看"]):
+        if any(sign in signal_text for sign in ["请先登录", "请登录后", "登录后查看"]):
             return "页面内容提示需登录后查看: 需要授权账号或 Cookie；不绕过登录"
-        if any(sign in html_lower for sign in ["访问频繁", "请求过于频繁"]):
+        if any(sign in signal_text for sign in ["访问频繁", "请求过于频繁"]):
             return "页面提示访问频繁: 建议降低频率或稍后重试"
+        if matched_sign:
+            return f"页面命中站点拓扑阻断信号 {matched_sign}: 不入库，继续保留为诊断"
         return "页面包含访问限制信号: 已跳过以避免误抓受限内容"
+
+    def _blocked_signs_for_url(self, url: str = "") -> List[str]:
+        signs = list(BLOCKED_SIGNS)
+        topology = self._topology_for_url(url) if url else None
+        if topology:
+            for key in ("blocked_phrases", "blocked_permission_phrases"):
+                values = topology.get(key)
+                if isinstance(values, str):
+                    signs.append(values)
+                elif isinstance(values, list):
+                    signs.extend(str(value) for value in values if value)
+            action_only = set()
+            for key in ("action_only_phrases", "non_blocking_phrases"):
+                values = topology.get(key)
+                if isinstance(values, str):
+                    action_only.add(values.lower())
+                elif isinstance(values, list):
+                    action_only.update(str(value).lower() for value in values if value)
+            if action_only:
+                signs = [sign for sign in signs if sign.lower() not in action_only]
+        return signs
+
+    def _matched_blocked_sign(self, html: str, url: str = "") -> str:
+        visible_lower = self._visible_text_for_blocking(html).lower()
+        for sign in self._blocked_signs_for_url(url):
+            if sign and sign.lower() in visible_lower:
+                return str(sign)
+        return ""
+
+    def _visible_text_for_blocking(self, html: str) -> str:
+        without_scripts = re.sub(
+            r"(?is)<(script|style|noscript|template|svg)\b[^>]*>.*?</\1>",
+            " ",
+            html or "",
+        )
+        text = re.sub(r"(?is)<[^>]+>", " ", without_scripts)
+        return self._normalize_space(text)
+
+    def _has_public_crawl_evidence(self, text: str) -> bool:
+        clean = self._normalize_space(text)
+        if self._has_detail_evidence(clean, allow_minimal=True):
+            return True
+        has_stage = self._has_strong_bid_stage(clean)
+        has_subject = any(term in clean for term in ["项目", "工程", "采购", "招标", "中标", "公告"])
+        return has_stage and has_subject and len(clean) >= 40
 
     def _record_diagnostic(
         self,

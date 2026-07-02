@@ -17,22 +17,43 @@ from database.storage import Storage
 
 
 class MonitorCoreUrlSourcesTests(unittest.TestCase):
-    def test_default_sites_are_loaded_from_bid_related_url_list(self):
+    def test_default_sites_are_loaded_from_canonical_url_sources(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            path = os.path.join(tmpdir, "bid_related_url_list.txt")
+            path = os.path.join(tmpdir, "url_sources.json")
             with open(path, "w", encoding="utf-8") as f:
-                f.write("https://example.com/a\n")
-                f.write("not a url\n")
-                f.write("https://example.com/a\n")
-                f.write("http://example.org/b\n")
+                f.write(
+                    '{"sources": ['
+                    '{"id": "source-a", "name": "源 A", "url": "https://example.com/a", "enabled": true},'
+                    '{"id": "source-b", "name": "源 B", "url": "http://example.org/b", "enabled": true},'
+                    '{"id": "source-off", "name": "禁用", "url": "https://example.com/off", "enabled": false}'
+                    ']}'
+                )
 
-            with patch.object(monitor_core_module, "DEFAULT_URL_LIST_PATH", path):
+            with patch.object(monitor_core_module, "DEFAULT_URL_SOURCES_PATH", path):
                 sites = monitor_core_module.get_default_sites()
 
-            self.assertEqual(list(sites.keys()), ["url_list_001", "url_list_002"])
-            self.assertEqual(sites["url_list_001"]["name"], "上海招投标URL 001")
-            self.assertEqual(sites["url_list_001"]["url"], "https://example.com/a")
-            self.assertEqual(sites["url_list_002"]["url"], "http://example.org/b")
+            self.assertEqual(list(sites.keys()), ["source-a", "source-b"])
+            self.assertEqual(sites["source-a"]["name"], "源 A")
+            self.assertEqual(sites["source-a"]["url"], "https://example.com/a")
+            self.assertEqual(sites["source-b"]["url"], "http://example.org/b")
+
+    def test_legacy_url_list_enabled_sites_are_not_loaded_as_crawlers(self):
+        fake_default_sites = {
+            "url_list_001": {"name": "旧 URL", "url": "https://old.example.com"}
+        }
+
+        with patch.object(monitor_core_module, "get_default_sites", return_value=fake_default_sites):
+            monitor = MonitorCore(
+                keywords=["弱电"],
+                notify_method="none",
+                crawler_overrides={
+                    "enabled_sites": ["url_list_001"],
+                    "use_selenium": False,
+                    "csv_url_sources": [],
+                },
+            )
+
+        self.assertEqual(monitor.crawlers, [])
 
     def test_monitor_core_loads_enabled_csv_url_sources(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -57,27 +78,6 @@ class MonitorCoreUrlSourcesTests(unittest.TestCase):
             self.assertEqual(len(url_crawlers), 1)
             self.assertEqual(url_crawlers[0].name, "上海招投标URL清单")
             self.assertEqual(url_crawlers[0].get_list_urls(), ["https://example.com"])
-
-    def test_default_site_logs_use_configured_display_name(self):
-        fake_default_sites = {
-            "url_list_003": {"name": "上海招投标URL 003", "url": "https://example.com/default"}
-        }
-
-        with patch.object(monitor_core_module, "get_default_sites", return_value=fake_default_sites):
-            monitor = MonitorCore(
-                keywords=["弱电"],
-                notify_method="none",
-                crawler_overrides={
-                    "enabled_sites": ["url_list_003"],
-                    "use_selenium": False,
-                    "site_metadata": {
-                        "url_list_003": {"display_name": "上海市公共资源交易中心"}
-                    },
-                },
-            )
-
-        self.assertEqual(len(monitor.crawlers), 1)
-        self.assertEqual(monitor.crawlers[0].name, "上海市公共资源交易中心")
 
     @patch.object(UrlListCrawler, "_request_url")
     def test_monitor_core_run_once_saves_url_list_results_to_storage(self, mock_request_url):

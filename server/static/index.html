@@ -373,8 +373,8 @@
                     <div class="config-section"><label class="config-label">排除关键词</label><textarea class="config-input" id="cfgExclude"></textarea></div>
                     <div class="config-section"><label class="config-label">必须包含</label><input type="text" class="config-input" id="cfgMustContain"></div>
                     <div class="config-section"><label class="config-label">检索间隔（分钟）</label><input type="number" class="config-input" id="cfgInterval" min="5" max="120" value="20"></div>
-                    <div class="toggle-switch"><span>Selenium浏览器模式</span><label class="switch"><input type="checkbox" id="cfgSelenium"><span class="slider"></span></label></div>
-                    <p class="hint">Selenium模式可抓取更多网站，但需要服务器安装Chrome浏览器</p>
+                    <div class="toggle-switch"><span>浏览器模式</span><label class="switch"><input type="checkbox" id="cfgSelenium"><span class="slider"></span></label></div>
+                    <p class="hint">浏览器模式会优先使用 CloakBrowser，必要时回落 Selenium，用于渲染 JS 列表和详情页</p>
                     <button class="btn btn-primary u-full u-full-mt-sm" onclick="saveConfig()"><svg class="icon icon-sm" aria-hidden="true"><use href="#icon-save"></use></svg><span>保存配置</span></button>
                 </div>
             </div>

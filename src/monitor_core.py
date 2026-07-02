@@ -47,6 +47,7 @@ except ImportError:
     from crawler.youuav import YouuavCrawler
 
 from crawler.browser import create_browser_crawler, shutdown_browsers
+from crawler.source_registry import load_url_sources
 
 # 爬虫注册表
 def get_all_crawlers():
@@ -55,6 +56,8 @@ def get_all_crawlers():
         'chinabidding': ChinaBiddingCrawler,
     }
 
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DEFAULT_URL_SOURCES_PATH = os.path.join(BASE_DIR, "server", "url_sources.json")
 DEFAULT_URL_LIST_PATH = "/Users/cervine/Documents/Rule-Project/projects/opportunity-collection/output/materials/bid_related_url_list.txt"
 
 
@@ -64,23 +67,13 @@ def _looks_like_url(value: str) -> bool:
 
 # 默认内置网站配置 (用于通用爬虫)
 def get_default_sites():
-    """从外部 URL 清单生成默认内置网站列表。"""
+    """从 canonical URL registry 生成站点元数据列表。"""
     sites = {}
-    if not os.path.exists(DEFAULT_URL_LIST_PATH):
-        return sites
-
-    seen = set()
-    with open(DEFAULT_URL_LIST_PATH, 'r', encoding='utf-8-sig') as f:
-        for line in f:
-            url = line.strip()
-            if not _looks_like_url(url) or url in seen:
-                continue
-            seen.add(url)
-            key = f"url_list_{len(sites) + 1:03d}"
-            sites[key] = {
-                'name': f"上海招投标URL {len(sites) + 1:03d}",
-                'url': url
-            }
+    for source in load_url_sources(DEFAULT_URL_SOURCES_PATH):
+        sites[source.id] = {
+            'name': source.name,
+            'url': source.url,
+        }
     return sites
 
 
@@ -172,7 +165,7 @@ class MonitorCore:
             return
 
         crawler_config = self.config.get('crawler', {})
-        for key in ['enabled_sites', 'use_selenium']:
+        for key in ['enabled_sites', 'use_selenium', 'browser_backend', 'site_topologies_path']:
             if key in self.crawler_overrides:
                 crawler_config[key] = self.crawler_overrides[key]
         self.config['crawler'] = crawler_config
@@ -238,27 +231,27 @@ class MonitorCore:
             self.log("[DEBUG] 浏览器模式已启用(CloakBrowser→Selenium→requests 降级)")
 
         from crawler.custom import CustomCrawler
-        default_sites = get_default_sites()
-        
-        for key in enabled:
-            if key in default_sites and key not in crawler_classes:
-                site = default_sites[key]
-                site_metadata = self.config.get('site_metadata', {}).get(key, {})
-                site_name = site_metadata.get('display_name') or site['name']
-                try:
-                    if use_selenium:
-                        crawler = create_browser_crawler(crawler_config, site_name, site['url'], headless=True)
-                        if crawler is None:
-                            self.log(f"[WARN] 无浏览器后端,回落 requests: {site_name}")
-                            crawler = CustomCrawler(crawler_config, site_name, site['url'])
+        if crawler_config.get('enable_legacy_site_crawlers', False):
+            default_sites = get_default_sites()
+            for key in enabled:
+                if key in default_sites and key not in crawler_classes:
+                    site = default_sites[key]
+                    site_metadata = self.config.get('site_metadata', {}).get(key, {})
+                    site_name = site_metadata.get('display_name') or site['name']
+                    try:
+                        if use_selenium:
+                            crawler = create_browser_crawler(crawler_config, site_name, site['url'], headless=True)
+                            if crawler is None:
+                                self.log(f"[WARN] 无浏览器后端,回落 requests: {site_name}")
+                                crawler = CustomCrawler(crawler_config, site_name, site['url'])
+                            else:
+                                self.log(f"[OK] Loaded site (browser): {site_name}")
                         else:
-                            self.log(f"[OK] Loaded site (browser): {site_name}")
-                    else:
-                        crawler = CustomCrawler(crawler_config, site_name, site['url'])
-                        self.log(f"[OK] Loaded site: {site_name}")
-                    crawlers.append(crawler)
-                except Exception as e:
-                    self.log(f"[WARN] Failed to load site {site_name}: {e}")
+                            crawler = CustomCrawler(crawler_config, site_name, site['url'])
+                            self.log(f"[OK] Loaded site: {site_name}")
+                        crawlers.append(crawler)
+                    except Exception as e:
+                        self.log(f"[WARN] Failed to load site {site_name}: {e}")
         
         # 3. 加载用户自定义爬虫
         custom_sites = self.config.get('custom_sites', []) if self.config.get('enable_custom_sites', False) else []
@@ -407,6 +400,7 @@ class MonitorCore:
                                     bid,
                                     self.ai_config_for_extraction,
                                     log_callback=self.log,
+                                    fetch_config=self.config.get('crawler', {}),
                                 )
                 
                 self.log(f"[OK] {crawler.name}: Found {len(bids)} items, {matched_count} new matches")

@@ -46,6 +46,8 @@ except ImportError:
     from crawler.dlnyzb import DlnyzbCrawler
     from crawler.youuav import YouuavCrawler
 
+from crawler.browser import create_browser_crawler, shutdown_browsers
+
 # 爬虫注册表
 def get_all_crawlers():
     """获取所有爬虫类"""
@@ -221,22 +223,14 @@ class MonitorCore:
                 except Exception as e:
                     self.log(f"[WARN] Failed to load crawler {name}: {e}")
         
-        # 判断是否使用Selenium模式
+        # 浏览器模式开关（向后兼容 use_selenium）
         use_selenium = crawler_config.get('use_selenium', False)
-        self.log(f"[DEBUG] Selenium模式: {'启用' if use_selenium else '禁用'}")
-        
+        self.log(f"[DEBUG] 浏览器模式: {'启用' if use_selenium else '禁用'}")
+
         # 2. 加载默认内置网站
         if use_selenium:
-            try:
-                from crawler.selenium_crawler import SeleniumCrawler, SELENIUM_AVAILABLE, IMPORT_ERROR_MSG
-                self.log(f"[DEBUG] Selenium可用: {SELENIUM_AVAILABLE}")
-                if not SELENIUM_AVAILABLE:
-                    self.log(f"[WARN] Selenium模块导入失败: {IMPORT_ERROR_MSG}，回退到普通模式")
-                    use_selenium = False
-            except ImportError as e:
-                self.log(f"[WARN] Selenium模块文件加载失败: {e}，回退到普通模式")
-                use_selenium = False
-        
+            self.log("[DEBUG] 浏览器模式已启用(CloakBrowser→Selenium→requests 降级)")
+
         from crawler.custom import CustomCrawler
         default_sites = get_default_sites()
         
@@ -245,8 +239,12 @@ class MonitorCore:
                 site = default_sites[key]
                 try:
                     if use_selenium:
-                        crawler = SeleniumCrawler(crawler_config, site['name'], site['url'], headless=True)
-                        self.log(f"[OK] Loaded site (Selenium): {site['name']}")
+                        crawler = create_browser_crawler(crawler_config, site['name'], site['url'], headless=True)
+                        if crawler is None:
+                            self.log(f"[WARN] 无浏览器后端,回落 requests: {site['name']}")
+                            crawler = CustomCrawler(crawler_config, site['name'], site['url'])
+                        else:
+                            self.log(f"[OK] Loaded site (browser): {site['name']}")
                     else:
                         crawler = CustomCrawler(crawler_config, site['name'], site['url'])
                         self.log(f"[OK] Loaded site: {site['name']}")
@@ -262,8 +260,12 @@ class MonitorCore:
                 url = site.get('url', '')
                 if name and url:
                     if use_selenium:
-                        crawler = SeleniumCrawler(crawler_config, name, url, headless=True)
-                        self.log(f"[OK] Loaded custom (Selenium): {name}")
+                        crawler = create_browser_crawler(crawler_config, name, url, headless=True)
+                        if crawler is None:
+                            self.log(f"[WARN] 无浏览器后端,回落 requests: {name}")
+                            crawler = CustomCrawler(crawler_config, name, url)
+                        else:
+                            self.log(f"[OK] Loaded custom (browser): {name}")
                     else:
                         crawler = CustomCrawler(crawler_config, name, url)
                         self.log(f"[OK] Loaded custom crawler: {name}")
@@ -425,8 +427,7 @@ class MonitorCore:
         
         # 关闭共享浏览器以释放内存
         try:
-            from crawler.selenium_crawler import SharedBrowserManager
-            SharedBrowserManager.close()
+            shutdown_browsers()
             self.log("✅ 已关闭共享浏览器，释放内存")
         except:
             pass

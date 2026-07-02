@@ -122,6 +122,33 @@ class ServerConfigDefaultsTests(unittest.TestCase):
                     "api_key": "ai-secret",
                     "endpoint_type": "responses",
                 },
+                "wechat_config": {
+                    "provider": "pushplus",
+                    "token": "wechat-secret",
+                },
+                "email_configs": [
+                    {
+                        "sender": "alerts@example.com",
+                        "password": "email-secret",
+                        "smtp_server": "smtp.example.com",
+                    }
+                ],
+                "contacts": [
+                    {
+                        "name": "Alice",
+                        "email": "alice@example.com",
+                        "email_password": "contact-email-secret",
+                        "wechat_token": "contact-wechat-secret",
+                    }
+                ],
+                "custom_nested": {
+                    "display_name": "Nested Display",
+                    "service_token": "nested-token-secret",
+                    "metadata": {
+                        "api_key": "nested-api-secret",
+                        "access_key_id": "public-id",
+                    },
+                },
             }
         )
 
@@ -130,6 +157,18 @@ class ServerConfigDefaultsTests(unittest.TestCase):
         self.assertEqual(config["sms_config"]["access_key_secret"], "***")
         self.assertEqual(config["voice_config"]["access_key_secret"], "***")
         self.assertEqual(config["ai_config"]["api_key"], "***")
+        self.assertEqual(config["wechat_config"]["token"], "***")
+        self.assertEqual(config["email_configs"][0]["password"], "***")
+        self.assertEqual(config["email_configs"][0]["sender"], "alerts@example.com")
+        self.assertEqual(config["contacts"][0]["email_password"], "***")
+        self.assertEqual(config["contacts"][0]["wechat_token"], "***")
+        self.assertEqual(config["contacts"][0]["name"], "Alice")
+        self.assertEqual(config["contacts"][0]["email"], "alice@example.com")
+        self.assertEqual(config["custom_nested"]["service_token"], "***")
+        self.assertEqual(config["custom_nested"]["metadata"]["api_key"], "***")
+        self.assertEqual(config["custom_nested"]["metadata"]["access_key_id"], "public-id")
+        self.assertEqual(app.app_state.config["wechat_config"]["token"], "wechat-secret")
+        self.assertEqual(app.app_state.config["contacts"][0]["wechat_token"], "contact-wechat-secret")
 
     def test_update_full_config_preserves_masked_secrets(self):
         app.app_state.config = app.normalize_config(
@@ -148,6 +187,24 @@ class ServerConfigDefaultsTests(unittest.TestCase):
                     "api_key": "ai-secret",
                     "endpoint_type": "responses",
                 },
+                "wechat_config": {
+                    "provider": "pushplus",
+                    "token": "wechat-secret",
+                },
+                "email_configs": [
+                    {
+                        "sender": "alerts@example.com",
+                        "password": "email-secret",
+                    }
+                ],
+                "contacts": [
+                    {
+                        "name": "Alice",
+                        "email": "alice@example.com",
+                        "email_password": "contact-email-secret",
+                        "wechat_token": "contact-wechat-secret",
+                    }
+                ],
             }
         )
 
@@ -167,6 +224,24 @@ class ServerConfigDefaultsTests(unittest.TestCase):
                     "api_key": "***",
                     "endpoint_type": "responses",
                 },
+                "wechat_config": {
+                    "provider": "pushplus",
+                    "token": "***",
+                },
+                "email_configs": [
+                    {
+                        "sender": "alerts@example.com",
+                        "password": "***",
+                    }
+                ],
+                "contacts": [
+                    {
+                        "name": "Alice",
+                        "email": "alice@example.com",
+                        "email_password": "",
+                        "wechat_token": "***",
+                    }
+                ],
             }
         )
 
@@ -177,6 +252,10 @@ class ServerConfigDefaultsTests(unittest.TestCase):
         self.assertEqual(app.app_state.config["sms_config"]["access_key_secret"], "sms-secret")
         self.assertEqual(app.app_state.config["voice_config"]["access_key_secret"], "voice-secret")
         self.assertEqual(app.app_state.config["ai_config"]["api_key"], "ai-secret")
+        self.assertEqual(app.app_state.config["wechat_config"]["token"], "wechat-secret")
+        self.assertEqual(app.app_state.config["email_configs"][0]["password"], "email-secret")
+        self.assertEqual(app.app_state.config["contacts"][0]["email_password"], "contact-email-secret")
+        self.assertEqual(app.app_state.config["contacts"][0]["wechat_token"], "contact-wechat-secret")
         save_config.assert_called_once_with(app.app_state.config)
 
     def test_get_sites_merges_metadata_and_returns_full_shape(self):

@@ -1120,11 +1120,8 @@ def _review_reason_tags() -> List[str]:
     return DEFAULT_NON_FOLLOW_REASON_TAGS.copy()
 
 
-CONFIG_SECRET_FIELDS = {
-    ("sms_config", "access_key_secret"),
-    ("voice_config", "access_key_secret"),
-    ("ai_config", "api_key"),
-}
+CONFIG_SECRET_MARKERS = ("password", "token", "secret", "api_key")
+CONFIG_PUBLIC_SECRET_NAME_EXCEPTIONS = {"access_key_id"}
 
 RESULT_OVERRIDE_FIELDS = {
     "organization",
@@ -1141,12 +1138,44 @@ RESULT_OVERRIDE_FIELDS = {
 }
 
 
-def _mask_config_secrets(config: Dict[str, Any]) -> Dict[str, Any]:
-    for section, secret_key in CONFIG_SECRET_FIELDS:
-        section_value = config.get(section)
-        if isinstance(section_value, dict) and section_value.get(secret_key):
-            section_value[secret_key] = "***"
+def _is_config_secret_key(key: Any) -> bool:
+    key_text = str(key).lower()
+    return key_text not in CONFIG_PUBLIC_SECRET_NAME_EXCEPTIONS and any(
+        marker in key_text for marker in CONFIG_SECRET_MARKERS
+    )
+
+
+def _is_masked_or_empty_secret(value: Any) -> bool:
+    return value in ("", None, "***")
+
+
+def _mask_config_secrets(config: Any) -> Any:
+    if isinstance(config, dict):
+        for key, value in config.items():
+            if _is_config_secret_key(key):
+                if value:
+                    config[key] = "***"
+            else:
+                _mask_config_secrets(value)
+    elif isinstance(config, list):
+        for item in config:
+            _mask_config_secrets(item)
     return config
+
+
+def _preserve_config_secrets(new_value: Any, old_value: Any) -> Any:
+    if isinstance(new_value, dict) and isinstance(old_value, dict):
+        for key, value in new_value.items():
+            if _is_config_secret_key(key):
+                if _is_masked_or_empty_secret(value):
+                    new_value[key] = old_value.get(key, "")
+            else:
+                new_value[key] = _preserve_config_secrets(value, old_value.get(key))
+    elif isinstance(new_value, list) and isinstance(old_value, list):
+        for index, item in enumerate(new_value):
+            old_item = old_value[index] if index < len(old_value) else None
+            new_value[index] = _preserve_config_secrets(item, old_item)
+    return new_value
 
 
 def _normalize_search_text(value: Any) -> str:
@@ -1361,24 +1390,8 @@ async def update_contacts(contacts: List[Dict[str, Any]], user: Dict[str, Any] =
 @app.post("/api/config/full")
 async def update_full_config(config: Dict[str, Any], user: Dict[str, Any] = Depends(get_current_user)):
     """更新完整配置（包括通知配置）"""
-    # 保留敏感字段如果前端没有传入
-    for key in ['sms_config', 'voice_config']:
-        if key in config and key in app_state.config:
-            if isinstance(config[key], dict):
-                for secret_key in ['access_key_secret']:
-                    if config[key].get(secret_key) in ['', None, '***']:
-                        config[key][secret_key] = app_state.config[key].get(secret_key, '')
-    
-    if 'ai_config' in config and 'ai_config' in app_state.config:
-        if config['ai_config'].get('api_key') in ['', None, '***']:
-            config['ai_config']['api_key'] = app_state.config.get('ai_config', {}).get('api_key', '')
-
-    if 'email_configs' in config and config['email_configs']:
-        for i, email_cfg in enumerate(config['email_configs']):
-            if email_cfg.get('password') in ['', None]:
-                old_configs = app_state.config.get('email_configs', [])
-                if i < len(old_configs):
-                    email_cfg['password'] = old_configs[i].get('password', '')
+    # 保留前端回传的掩码/空值对应的既有敏感字段。
+    config = _preserve_config_secrets(config, app_state.config)
     config = normalize_config(config)
     app_state.config.update(config)
     save_config(app_state.config)

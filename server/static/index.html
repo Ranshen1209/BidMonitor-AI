@@ -5,17 +5,193 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>BidMonitor 招标监控</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link rel="stylesheet" href="/static/styles.css">
     <script defer src="/static/app.js"></script>
 </head>
 
 <body>
+    <svg class="icon-sprite" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg">
+        <symbol id="icon-search" viewBox="0 0 24 24">
+            <circle cx="11" cy="11" r="7"></circle>
+            <path d="m16.5 16.5 4 4"></path>
+        </symbol>
+        <symbol id="icon-refresh" viewBox="0 0 24 24">
+            <path d="M20 11a8 8 0 0 0-14.7-4.4L3 9"></path>
+            <path d="M3 4v5h5"></path>
+            <path d="M4 13a8 8 0 0 0 14.7 4.4L21 15"></path>
+            <path d="M16 15h5v5"></path>
+        </symbol>
+        <symbol id="icon-chart" viewBox="0 0 24 24">
+            <path d="M4 19V5"></path>
+            <path d="M4 19h16"></path>
+            <path d="M8 16v-5"></path>
+            <path d="M12 16V8"></path>
+            <path d="M16 16v-3"></path>
+        </symbol>
+        <symbol id="icon-timer" viewBox="0 0 24 24">
+            <circle cx="12" cy="13" r="7"></circle>
+            <path d="M12 13V9"></path>
+            <path d="M12 13h3"></path>
+            <path d="M9 2h6"></path>
+        </symbol>
+        <symbol id="icon-activity" viewBox="0 0 24 24">
+            <path d="M3 12h4l3 7 4-14 3 7h4"></path>
+        </symbol>
+        <symbol id="icon-control" viewBox="0 0 24 24">
+            <path d="M6 7h12"></path>
+            <path d="M6 17h12"></path>
+            <circle cx="9" cy="7" r="2"></circle>
+            <circle cx="15" cy="17" r="2"></circle>
+        </symbol>
+        <symbol id="icon-play" viewBox="0 0 24 24">
+            <path d="M8 5v14l11-7Z"></path>
+        </symbol>
+        <symbol id="icon-stop" viewBox="0 0 24 24">
+            <path d="M7 7h10v10H7Z"></path>
+        </symbol>
+        <symbol id="icon-list" viewBox="0 0 24 24">
+            <path d="M8 6h13"></path>
+            <path d="M8 12h13"></path>
+            <path d="M8 18h13"></path>
+            <path d="M3 6h.01"></path>
+            <path d="M3 12h.01"></path>
+            <path d="M3 18h.01"></path>
+        </symbol>
+        <symbol id="icon-trash" viewBox="0 0 24 24">
+            <path d="M3 6h18"></path>
+            <path d="M8 6V4h8v2"></path>
+            <path d="M19 6 18 20H6L5 6"></path>
+            <path d="M10 11v5"></path>
+            <path d="M14 11v5"></path>
+        </symbol>
+        <symbol id="icon-globe" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="9"></circle>
+            <path d="M3 12h18"></path>
+            <path d="M12 3a14 14 0 0 1 0 18"></path>
+            <path d="M12 3a14 14 0 0 0 0 18"></path>
+        </symbol>
+        <symbol id="icon-check" viewBox="0 0 24 24">
+            <path d="m5 12 4 4L19 6"></path>
+        </symbol>
+        <symbol id="icon-x" viewBox="0 0 24 24">
+            <path d="M6 6l12 12"></path>
+            <path d="M18 6 6 18"></path>
+        </symbol>
+        <symbol id="icon-save" viewBox="0 0 24 24">
+            <path d="M5 4h12l2 2v14H5Z"></path>
+            <path d="M8 4v6h8V4"></path>
+            <path d="M8 20v-6h8v6"></path>
+        </symbol>
+        <symbol id="icon-plus" viewBox="0 0 24 24">
+            <path d="M12 5v14"></path>
+            <path d="M5 12h14"></path>
+        </symbol>
+        <symbol id="icon-users" viewBox="0 0 24 24">
+            <circle cx="9" cy="8" r="3"></circle>
+            <path d="M3 20a6 6 0 0 1 12 0"></path>
+            <path d="M16 11a3 3 0 0 0 0-6"></path>
+            <path d="M18 20a5 5 0 0 0-3-4.6"></path>
+        </symbol>
+        <symbol id="icon-settings" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a8.1 8.1 0 0 0 .1-6l-2.2.4a6 6 0 0 0-1.2-1.2l.4-2.2a8.1 8.1 0 0 0-6 0l.4 2.2a6 6 0 0 0-1.2 1.2L7.5 9a8.1 8.1 0 0 0 0 6l2.2-.4a6 6 0 0 0 1.2 1.2l-.4 2.2a8.1 8.1 0 0 0 6 0l-.4-2.2a6 6 0 0 0 1.2-1.2Z"></path>
+        </symbol>
+        <symbol id="icon-bell" viewBox="0 0 24 24">
+            <path d="M6 9a6 6 0 0 1 12 0c0 7 3 7 3 9H3c0-2 3-2 3-9"></path>
+            <path d="M10 21h4"></path>
+        </symbol>
+        <symbol id="icon-message" viewBox="0 0 24 24">
+            <path d="M4 5h16v11H8l-4 4Z"></path>
+            <path d="M8 9h8"></path>
+            <path d="M8 13h5"></path>
+        </symbol>
+        <symbol id="icon-phone" viewBox="0 0 24 24">
+            <path d="M22 16.9v3a2 2 0 0 1-2.2 2 19 19 0 0 1-8.3-3 18.6 18.6 0 0 1-5.7-5.7 19 19 0 0 1-3-8.3A2 2 0 0 1 4.8 2h3a2 2 0 0 1 2 1.7c.1.9.3 1.8.7 2.6a2 2 0 0 1-.5 2.1L8.8 9.6a15 15 0 0 0 5.6 5.6l1.2-1.2a2 2 0 0 1 2.1-.5c.8.3 1.7.6 2.6.7a2 2 0 0 1 1.7 2Z"></path>
+        </symbol>
+        <symbol id="icon-bot" viewBox="0 0 24 24">
+            <path d="M12 4V2"></path>
+            <rect x="5" y="7" width="14" height="12" rx="3"></rect>
+            <path d="M9 12h.01"></path>
+            <path d="M15 12h.01"></path>
+            <path d="M9 16h6"></path>
+        </symbol>
+        <symbol id="icon-warning" viewBox="0 0 24 24">
+            <path d="M12 3 22 20H2Z"></path>
+            <path d="M12 9v5"></path>
+            <path d="M12 17h.01"></path>
+        </symbol>
+        <symbol id="icon-user" viewBox="0 0 24 24">
+            <circle cx="12" cy="8" r="4"></circle>
+            <path d="M4 21a8 8 0 0 1 16 0"></path>
+        </symbol>
+        <symbol id="icon-mail" viewBox="0 0 24 24">
+            <path d="M4 6h16v12H4Z"></path>
+            <path d="m4 7 8 6 8-6"></path>
+        </symbol>
+        <symbol id="icon-test" viewBox="0 0 24 24">
+            <path d="M10 2v6L5 19a2 2 0 0 0 1.9 3h10.2A2 2 0 0 0 19 19L14 8V2"></path>
+            <path d="M8 2h8"></path>
+            <path d="M7 16h10"></path>
+        </symbol>
+        <symbol id="icon-home" viewBox="0 0 24 24">
+            <path d="m3 11 9-8 9 8"></path>
+            <path d="M5 10v10h14V10"></path>
+            <path d="M10 20v-6h4v6"></path>
+        </symbol>
+        <symbol id="icon-calendar" viewBox="0 0 24 24">
+            <path d="M7 3v4"></path>
+            <path d="M17 3v4"></path>
+            <rect x="4" y="5" width="16" height="16" rx="2"></rect>
+            <path d="M4 10h16"></path>
+        </symbol>
+        <symbol id="icon-map-pin" viewBox="0 0 24 24">
+            <path d="M12 22s7-5.3 7-12A7 7 0 0 0 5 10c0 6.7 7 12 7 12Z"></path>
+            <circle cx="12" cy="10" r="2.5"></circle>
+        </symbol>
+        <symbol id="icon-inbox" viewBox="0 0 24 24">
+            <path d="M4 13 7 5h10l3 8v6H4Z"></path>
+            <path d="M4 13h5l2 3h2l2-3h5"></path>
+        </symbol>
+        <symbol id="icon-link" viewBox="0 0 24 24">
+            <path d="M10 13a5 5 0 0 0 7.1 0l2-2a5 5 0 0 0-7.1-7.1l-1.1 1.1"></path>
+            <path d="M14 11a5 5 0 0 0-7.1 0l-2 2A5 5 0 0 0 12 20.1l1.1-1.1"></path>
+        </symbol>
+        <symbol id="icon-chevron-right" viewBox="0 0 24 24">
+            <path d="m9 18 6-6-6-6"></path>
+        </symbol>
+    </svg>
+
+    <div id="loginView" class="login-view">
+        <form id="loginForm" class="login-panel" onsubmit="login(event)">
+            <div class="login-brand">
+                <svg class="icon brand-mark" aria-hidden="true"><use href="#icon-search"></use></svg>
+                <span>BidMonitor</span>
+            </div>
+            <div class="config-section">
+                <label class="config-label" for="loginUsername">账号</label>
+                <input type="text" class="config-input" id="loginUsername" autocomplete="username" value="Admin">
+            </div>
+            <div class="config-section">
+                <label class="config-label" for="loginPassword">密码</label>
+                <input type="password" class="config-input" id="loginPassword" autocomplete="current-password" value="123654">
+            </div>
+            <div id="loginError" class="form-error"></div>
+            <button class="btn btn-primary u-full" type="submit"><svg class="icon icon-sm" aria-hidden="true"><use href="#icon-user"></use></svg><span>登录</span></button>
+        </form>
+    </div>
+
+    <div id="appShell" class="app-shell">
     <div class="header">
         <div>
-            <h1>🔍 BidMonitor</h1>
+            <h1><svg class="icon brand-mark" aria-hidden="true"><use href="#icon-search"></use></svg><span>BidMonitor</span></h1>
             <div class="subtitle">招标信息监控系统</div>
         </div>
-        <button class="refresh-btn" onclick="refreshAll()">🔄 刷新</button>
+        <div class="header-actions">
+            <span id="currentUserLabel" class="user-chip"></span>
+            <button class="refresh-btn" onclick="refreshAll()"><svg class="icon icon-sm" aria-hidden="true"><use href="#icon-refresh"></use></svg><span>刷新</span></button>
+            <button class="refresh-btn" onclick="logout()"><svg class="icon icon-sm" aria-hidden="true"><use href="#icon-x"></use></svg><span>退出</span></button>
+        </div>
     </div>
 
     <div class="status-bar">
@@ -26,9 +202,9 @@
     </div>
 
     <div id="page-home" class="page active">
-        <div class="container">
-            <div class="card">
-                <div class="card-title">📊 今日统计</div>
+        <div class="container dashboard-grid">
+            <div class="card panel-stats">
+                <div class="card-title"><span class="title-label"><svg class="icon" aria-hidden="true"><use href="#icon-chart"></use></svg><span>今日统计</span></span></div>
                 <div class="stats-grid">
                     <div class="stat-item">
                         <div class="stat-value" id="todayNew">-</div>
@@ -44,12 +220,12 @@
                     </div>
                 </div>
                 <div class="countdown-box" id="countdownBox">
-                    <div class="countdown-label">⏱️ 下次检索倒计时</div>
+                    <div class="countdown-label"><svg class="icon icon-sm" aria-hidden="true"><use href="#icon-timer"></use></svg><span>下次检索倒计时</span></div>
                     <div class="countdown-value" id="countdownValue">--:--</div>
                 </div>
                 <div class="progress-box" id="progressBox">
                     <div class="progress-head">
-                        <span class="action-link">🔄 正在检索</span>
+                        <span class="action-link"><svg class="icon icon-sm" aria-hidden="true"><use href="#icon-refresh"></use></svg><span>正在检索</span></span>
                         <span id="progressText" class="action-link">0/0</span>
                     </div>
                     <div class="progress-track">
@@ -59,19 +235,19 @@
                 </div>
             </div>
 
-            <div class="card">
-                <div class="card-title">🎮 监控控制</div>
+            <div class="card panel-control">
+                <div class="card-title"><span class="title-label"><svg class="icon" aria-hidden="true"><use href="#icon-control"></use></svg><span>监控控制</span></span></div>
                 <div class="btn-group">
-                    <button class="btn btn-success" id="btnStart" onclick="startMonitor()">▶️ 开始</button>
-                    <button class="btn btn-danger" id="btnStop" onclick="stopMonitor()">⏹️ 停止</button>
+                    <button class="btn btn-primary" id="btnStart" onclick="startMonitor()"><svg class="icon icon-sm" aria-hidden="true"><use href="#icon-play"></use></svg><span>开始</span></button>
+                    <button class="btn btn-outline btn-stop" id="btnStop" onclick="stopMonitor()"><svg class="icon icon-sm" aria-hidden="true"><use href="#icon-stop"></use></svg><span>停止</span></button>
                 </div>
-                <button class="btn btn-outline u-full u-full-mt-sm" onclick="runOnce()">🔍 立即检索一次</button>
+                <button class="btn btn-outline u-full u-full-mt-sm" onclick="runOnce()"><svg class="icon icon-sm" aria-hidden="true"><use href="#icon-search"></use></svg><span>立即检索一次</span></button>
             </div>
 
-            <div class="card">
+            <div class="card panel-logs">
                 <div class="u-title-split">
-                    <span>📝 实时日志</span>
-                    <button class="btn btn-sm btn-outline" onclick="clearLogs()">🗑️ 清除</button>
+                    <span class="title-label"><svg class="icon" aria-hidden="true"><use href="#icon-list"></use></svg><span>实时日志</span></span>
+                    <button class="btn btn-sm btn-outline" onclick="clearLogs()"><svg class="icon icon-sm" aria-hidden="true"><use href="#icon-trash"></use></svg><span>清除</span></button>
                 </div>
                 <div class="logs-container" id="logsContainer">
                     <div class="loading">加载中...</div>
@@ -83,108 +259,173 @@
     <div id="page-results" class="page">
         <div class="container">
             <div class="card">
-                <div class="card-title">📋 最新招标信息</div>
-                <div id="resultsList">
-                    <div class="loading">加载中...</div>
+                <div class="u-title-split">
+                    <span class="title-label"><svg class="icon" aria-hidden="true"><use href="#icon-list"></use></svg><span>结果中心</span></span>
+                    <button class="btn btn-sm btn-outline" onclick="openBulkReview()"><svg class="icon icon-sm" aria-hidden="true"><use href="#icon-check"></use></svg><span>批量复核</span></button>
+                </div>
+                <div id="resultFilterBar" class="result-filter-bar">
+                    <label class="filter-search">
+                        <svg class="icon icon-sm" aria-hidden="true"><use href="#icon-search"></use></svg>
+                        <input type="search" class="config-input" id="resultSearchInput" placeholder="搜索项目、单位、地区、分类" onkeydown="if (event.key === 'Enter') loadResults()">
+                    </label>
+                    <select class="config-input status-select" id="resultFitStatusFilter" onchange="loadResults()">
+                        <option value="">适合性</option>
+                    </select>
+                    <select class="config-input status-select" id="resultFollowDecisionFilter" onchange="loadResults()">
+                        <option value="">跟进决策</option>
+                    </select>
+                    <select class="config-input status-select" id="resultUrgencyFilter" onchange="loadResults()">
+                        <option value="">紧急度</option>
+                    </select>
+                    <select class="config-input status-select" id="resultProjectStageFilter" onchange="loadResults()">
+                        <option value="">项目阶段</option>
+                    </select>
+                    <input type="text" class="config-input" id="resultSourceFilter" placeholder="来源" onkeydown="if (event.key === 'Enter') loadResults()">
+                    <input type="text" class="config-input" id="resultRegionFilter" placeholder="地区" onkeydown="if (event.key === 'Enter') loadResults()">
+                    <input type="text" class="config-input" id="resultCategoryFilter" placeholder="分类" onkeydown="if (event.key === 'Enter') loadResults()">
+                    <button class="btn btn-outline" onclick="loadResults()"><svg class="icon icon-sm" aria-hidden="true"><use href="#icon-refresh"></use></svg><span>刷新</span></button>
+                    <button class="btn btn-primary" onclick="openBulkReview()"><svg class="icon icon-sm" aria-hidden="true"><use href="#icon-check"></use></svg><span>批量编辑</span></button>
+                </div>
+                <div class="results-shell">
+                    <div class="results-table-wrap">
+                        <table class="results-table">
+                            <thead>
+                                <tr>
+                                    <th><input type="checkbox" class="result-checkbox" id="resultsSelectAll" onchange="toggleSelectAllResults(this.checked)" aria-label="全选结果"></th>
+                                    <th>项目名称</th>
+                                    <th>适合性</th>
+                                    <th>跟进决策</th>
+                                    <th>紧急度</th>
+                                    <th>项目阶段</th>
+                                    <th>单位</th>
+                                    <th>金额</th>
+                                    <th>地区</th>
+                                    <th>分类</th>
+                                    <th>报名/文件截止</th>
+                                    <th>投标截止</th>
+                                    <th>开标时间</th>
+                                    <th>AI状态</th>
+                                    <th>来源</th>
+                                </tr>
+                            </thead>
+                            <tbody id="resultsTableBody">
+                                <tr><td colspan="15" class="table-empty">加载中...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <aside id="resultDetailPanel" class="result-detail-panel">
+                        <div class="detail-panel-header">
+                            <div>
+                                <div class="detail-kicker" id="detailSourceLabel">未选择结果</div>
+                                <h2 id="detailTitle">选择一条结果查看详情</h2>
+                            </div>
+                            <a class="btn btn-sm btn-outline" id="detailSourceLink" href="#" target="_blank" rel="noopener noreferrer"><svg class="icon icon-sm" aria-hidden="true"><use href="#icon-link"></use></svg><span>原文</span></a>
+                        </div>
+                        <div class="detail-empty" id="detailEmptyState">
+                            <svg class="icon icon-lg" aria-hidden="true"><use href="#icon-inbox"></use></svg>
+                            <span id="detailEmptyMessage">选择一条结果查看详情</span>
+                        </div>
+                        <div class="detail-grid" id="detailGrid">
+                            <div class="config-section"><label class="config-label">适合性</label><select class="config-input status-select" id="detailFitStatus"></select></div>
+                            <div class="config-section"><label class="config-label">跟进决策</label><select class="config-input status-select" id="detailFollowDecision"></select></div>
+                            <div class="config-section"><label class="config-label">紧急度</label><select class="config-input status-select" id="detailUrgency"></select></div>
+                            <div class="config-section"><label class="config-label">项目阶段</label><select class="config-input status-select" id="detailProjectStage"></select></div>
+                            <div class="config-section config-section-wide"><label class="config-label">不跟进原因</label><div id="detailNonFollowReasons" class="reason-list"></div></div>
+                            <div class="config-section config-section-wide"><label class="config-label">复核备注</label><textarea class="config-input" id="detailReviewNotes" rows="3"></textarea></div>
+                            <div class="config-section"><label class="config-label">单位</label><input type="text" class="config-input" id="detailOrganization"></div>
+                            <div class="config-section"><label class="config-label">金额</label><input type="text" class="config-input" id="detailAmount"></div>
+                            <div class="config-section"><label class="config-label">金额单位</label><input type="text" class="config-input" id="detailAmountUnit"></div>
+                            <div class="config-section"><label class="config-label">地区</label><input type="text" class="config-input" id="detailRegion"></div>
+                            <div class="config-section"><label class="config-label">分类</label><input type="text" class="config-input" id="detailCategory"></div>
+                            <div class="config-section"><label class="config-label">采购单位</label><input type="text" class="config-input" id="detailPurchaser" readonly></div>
+                            <div class="config-section"><label class="config-label">报名/文件截止</label><input type="text" class="config-input" id="detailRegistrationDeadline"></div>
+                            <div class="config-section"><label class="config-label">投标截止</label><input type="text" class="config-input" id="detailSubmissionDeadline"></div>
+                            <div class="config-section"><label class="config-label">开标时间</label><input type="text" class="config-input" id="detailBidOpeningTime"></div>
+                            <div class="config-section config-section-wide"><label class="config-label">AI提取状态</label><div class="detail-meta-line" id="detailStatusLine">-</div></div>
+                            <div class="config-section config-section-wide"><label class="config-label">正文</label><div class="detail-text-block" id="detailTextBlock"></div></div>
+                            <div class="config-section config-section-wide"><label class="config-label">AI提取数据</label><pre class="detail-code-block" id="detailAiJson"></pre></div>
+                        </div>
+                        <div class="modal-footer detail-footer">
+                            <button class="btn btn-outline modal-action" id="detailFieldsSaveButton" onclick="saveActiveResultFields()" disabled><svg class="icon icon-sm" aria-hidden="true"><use href="#icon-save"></use></svg><span>保存字段修正</span></button>
+                            <button class="btn btn-primary modal-action" id="detailReviewSaveButton" onclick="saveActiveResultReview()" disabled><svg class="icon icon-sm" aria-hidden="true"><use href="#icon-check"></use></svg><span>保存复核</span></button>
+                        </div>
+                    </aside>
                 </div>
             </div>
         </div>
     </div>
 
     <div id="page-sites" class="page">
-        <div class="container">
+        <div class="container content-grid sites-layout">
             <div class="card">
-                <div class="card-title">🌐 内置网站</div>
-                <div class="btn-group u-full-mt-sm">
-                    <button class="btn btn-sm btn-outline" onclick="selectAllSites()">✅ 全选</button>
-                    <button class="btn btn-sm btn-outline" onclick="deselectAllSites()">❌ 取消全选</button>
+                <div class="card-title"><span class="title-label"><svg class="icon" aria-hidden="true"><use href="#icon-globe"></use></svg><span>内置网站</span></span></div>
+                <div class="btn-group u-full-mt-sm" data-admin-only>
+                    <button class="btn btn-sm btn-outline" onclick="selectAllSites()"><svg class="icon icon-sm" aria-hidden="true"><use href="#icon-check"></use></svg><span>全选</span></button>
+                    <button class="btn btn-sm btn-outline" onclick="deselectAllSites()"><svg class="icon icon-sm" aria-hidden="true"><use href="#icon-x"></use></svg><span>取消全选</span></button>
                 </div>
-                <div id="sitesList" class="sites-scroll">
+                <div id="sitesList" class="sites-scroll site-management-list">
                     <div class="loading">加载中...</div>
                 </div>
-                <button class="btn btn-primary u-full u-full-mt-sm" onclick="saveSites()">💾 保存网站配置</button>
-            </div>
-            <div class="card">
-                <div class="card-title">➕ 自定义网站</div>
-                <p class="hint">添加任意招标网站URL，系统将尝试自动解析</p>
-                <div id="customSitesList"></div>
-                <button class="btn btn-outline u-full u-full-mt-sm" onclick="showAddCustomSite()">➕ 添加自定义网站</button>
             </div>
         </div>
-    </div>
-
-    <div id="page-contacts" class="page">
-        <div class="container">
-            <div class="card">
-                <div class="card-title">👥 联系人管理</div>
-                <div id="contactsList">
-                    <div class="loading">加载中...</div>
-                </div>
-                <button class="btn btn-primary u-full u-full-mt-sm" onclick="showAddContact()">➕ 添加联系人</button>
-            </div>
-        </div>
+        <button class="sites-save-fab btn btn-primary" data-admin-only onclick="saveSites()" aria-label="保存网站配置"><svg class="icon icon-sm" aria-hidden="true"><use href="#icon-save"></use></svg><span class="fab-label">保存</span></button>
     </div>
 
     <div id="page-config" class="page">
-        <div class="container">
-            <div class="card">
-                <div class="card-title">🔍 搜索配置</div>
-                <div class="config-section"><label class="config-label">关注关键词（逗号分隔）</label><textarea class="config-input" id="cfgKeywords"></textarea></div>
-                <div class="config-section"><label class="config-label">排除关键词</label><textarea class="config-input" id="cfgExclude"></textarea></div>
-                <div class="config-section"><label class="config-label">必须包含</label><input type="text" class="config-input" id="cfgMustContain"></div>
-                <div class="config-section"><label class="config-label">检索间隔（分钟）</label><input type="number" class="config-input" id="cfgInterval" min="5" max="120" value="20"></div>
-                <div class="toggle-switch"><span>🌐 Selenium浏览器模式</span><label class="switch"><input type="checkbox" id="cfgSelenium"><span class="slider"></span></label></div>
-                <p class="hint">Selenium模式可抓取更多网站，但需要服务器安装Chrome浏览器</p>
-                <button class="btn btn-primary u-full u-full-mt-sm" onclick="saveConfig()">💾 保存配置</button>
+        <div class="container content-grid config-layout">
+            <div class="config-column config-main-column">
+                <div class="card">
+                    <div class="card-title"><span class="title-label"><svg class="icon" aria-hidden="true"><use href="#icon-search"></use></svg><span>搜索配置</span></span></div>
+                    <div class="config-section"><label class="config-label">关注关键词（逗号分隔）</label><textarea class="config-input" id="cfgKeywords"></textarea></div>
+                    <div class="config-section"><label class="config-label">排除关键词</label><textarea class="config-input" id="cfgExclude"></textarea></div>
+                    <div class="config-section"><label class="config-label">必须包含</label><input type="text" class="config-input" id="cfgMustContain"></div>
+                    <div class="config-section"><label class="config-label">检索间隔（分钟）</label><input type="number" class="config-input" id="cfgInterval" min="5" max="120" value="20"></div>
+                    <div class="toggle-switch"><span>Selenium浏览器模式</span><label class="switch"><input type="checkbox" id="cfgSelenium"><span class="slider"></span></label></div>
+                    <p class="hint">Selenium模式可抓取更多网站，但需要服务器安装Chrome浏览器</p>
+                    <button class="btn btn-primary u-full u-full-mt-sm" onclick="saveConfig()"><svg class="icon icon-sm" aria-hidden="true"><use href="#icon-save"></use></svg><span>保存配置</span></button>
+                </div>
             </div>
-            <div class="card">
-                <div class="card-title">🔔 通知API配置</div>
-                <p class="hint">💡 邮件和微信Token请在联系人中单独配置</p>
-                <div class="toggle-switch" onclick="showSmsConfig()"><span>📱 短信API</span><span class="action-link">配置 ▶</span></div>
-                <div class="toggle-switch" onclick="showVoiceConfig()"><span>📞 语音API</span><span class="action-link">配置 ▶</span></div>
-                <div class="toggle-switch" onclick="showAiConfig()"><span>🤖 AI智能分析</span><span class="action-link">配置 ▶</span></div>
-            </div>
-            <div class="card">
-                <div class="card-title">⚠️ 危险操作</div>
-                <button class="btn btn-danger u-full" onclick="clearHistory()">🗑️ 清空历史数据</button>
+            <div class="config-column config-side-column">
+                <div class="card">
+                    <div class="card-title"><span class="title-label"><svg class="icon" aria-hidden="true"><use href="#icon-bot"></use></svg><span>AI配置</span></span></div>
+                    <div class="toggle-switch" onclick="showAiConfig()"><span class="title-label"><svg class="icon icon-sm" aria-hidden="true"><use href="#icon-bot"></use></svg><span>AI智能分析</span></span><span class="action-link">配置 <svg class="icon icon-sm" aria-hidden="true"><use href="#icon-chevron-right"></use></svg></span></div>
+                </div>
+                <div class="card">
+                    <div class="card-title"><span class="title-label"><svg class="icon" aria-hidden="true"><use href="#icon-warning"></use></svg><span>危险操作</span></span></div>
+                    <button class="btn btn-outline u-full" onclick="clearHistory()"><svg class="icon icon-sm" aria-hidden="true"><use href="#icon-trash"></use></svg><span>清空历史数据</span></button>
+                </div>
             </div>
         </div>
     </div>
 
-    <div id="contactModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header"><span id="contactModalTitle">添加联系人</span><button class="modal-close" onclick="closeContactModal()">×</button></div>
-            <div class="modal-body">
-                <div class="config-section"><label class="config-label">👤 姓名*</label><input type="text" class="config-input" id="contactName"></div>
-                <div class="config-section"><label class="config-label">📱 手机号</label><input type="tel" class="config-input" id="contactPhone"><p class="hint">用于接收短信和语音通知</p></div>
-                <div class="config-section"><label class="config-label">📧 邮箱地址</label><input type="email" class="config-input" id="contactEmail"></div>
-                <div class="config-section"><label class="config-label">邮箱类型</label><select class="config-input" id="contactEmailType"><option value="QQ邮箱">QQ邮箱</option><option value="163邮箱">163邮箱</option><option value="Gmail">Gmail</option><option value="Outlook">Outlook</option><option value="企业邮箱">企业邮箱</option></select></div>
-                <div class="config-section"><label class="config-label">邮箱授权码</label><input type="password" class="config-input" id="contactEmailPassword"><p class="hint">QQ邮箱需在设置中开启SMTP并获取授权码</p></div>
-                <div class="config-section"><label class="config-label">💬 微信PushPlus Token</label><input type="text" class="config-input" id="contactWechatToken"><p class="hint">在 pushplus.plus 获取Token接收微信通知</p></div>
-                <div class="toggle-switch"><span>启用此联系人通知</span><label class="switch"><input type="checkbox" id="contactEnabled" checked><span class="slider"></span></label></div>
-            </div>
-            <div class="modal-footer">
-                <button class="btn btn-outline modal-action" onclick="closeContactModal()">取消</button>
-                <button class="btn btn-warning modal-action" onclick="testContactNotify()">🧪 测试</button>
-                <button class="btn btn-primary modal-action" onclick="saveContact()">保存</button>
+    <div id="page-users" class="page">
+        <div class="container">
+            <div class="card">
+                <div class="u-title-split">
+                    <span class="title-label"><svg class="icon" aria-hidden="true"><use href="#icon-users"></use></svg><span>团队用户</span></span>
+                    <button class="btn btn-sm btn-primary" onclick="showAddUser()"><svg class="icon icon-sm" aria-hidden="true"><use href="#icon-plus"></use></svg><span>添加用户</span></button>
+                </div>
+                <div id="usersList">
+                    <div class="loading">加载中...</div>
+                </div>
             </div>
         </div>
     </div>
 
     <div id="smsModal" class="modal">
         <div class="modal-content">
-            <div class="modal-header"><span>📱 短信API配置</span><button class="modal-close" onclick="closeModal('smsModal')">×</button></div>
+            <div class="modal-header"><span class="title-label"><svg class="icon" aria-hidden="true"><use href="#icon-message"></use></svg><span>短信API配置</span></span><button class="modal-close" onclick="closeModal('smsModal')" aria-label="关闭"><svg class="icon" aria-hidden="true"><use href="#icon-x"></use></svg></button></div>
             <div class="modal-body">
                 <div class="toggle-switch"><span>启用短信通知</span><label class="switch"><input type="checkbox" id="smsEnabled"><span class="slider"></span></label></div>
                 <div class="config-section"><label class="config-label">AccessKey ID</label><input type="text" class="config-input" id="smsAkid"></div>
                 <div class="config-section"><label class="config-label">AccessKey Secret</label><input type="password" class="config-input" id="smsAksecret"><p class="hint">留空则保留原值</p></div>
                 <div class="config-section"><label class="config-label">签名名称</label><input type="text" class="config-input" id="smsSign"></div>
                 <div class="config-section"><label class="config-label">模板代码</label><input type="text" class="config-input" id="smsTemplate"></div>
-                <div class="config-section"><label class="config-label">🧪 测试手机号</label><input type="tel" class="config-input" id="smsTestPhone" placeholder="输入手机号进行测试"></div>
+                <div class="config-section"><label class="config-label"><svg class="icon icon-sm" aria-hidden="true"><use href="#icon-test"></use></svg><span>测试手机号</span></label><input type="tel" class="config-input" id="smsTestPhone" placeholder="输入手机号进行测试"></div>
             </div>
             <div class="modal-footer">
                 <button class="btn btn-outline modal-action" onclick="closeModal('smsModal')">取消</button>
-                <button class="btn btn-warning modal-action" onclick="testSms()">🧪 测试</button>
+                <button class="btn btn-warning modal-action" onclick="testSms()"><svg class="icon icon-sm" aria-hidden="true"><use href="#icon-test"></use></svg><span>测试</span></button>
                 <button class="btn btn-primary modal-action" onclick="saveSmsConfig()">保存</button>
             </div>
         </div>
@@ -192,18 +433,18 @@
 
     <div id="voiceModal" class="modal">
         <div class="modal-content">
-            <div class="modal-header"><span>📞 语音通知配置</span><button class="modal-close" onclick="closeModal('voiceModal')">×</button></div>
+            <div class="modal-header"><span class="title-label"><svg class="icon" aria-hidden="true"><use href="#icon-phone"></use></svg><span>语音通知配置</span></span><button class="modal-close" onclick="closeModal('voiceModal')" aria-label="关闭"><svg class="icon" aria-hidden="true"><use href="#icon-x"></use></svg></button></div>
             <div class="modal-body">
                 <div class="toggle-switch"><span>启用语音通知</span><label class="switch"><input type="checkbox" id="voiceEnabled"><span class="slider"></span></label></div>
                 <div class="config-section"><label class="config-label">AccessKey ID</label><input type="text" class="config-input" id="voiceAkid"><p class="hint">阿里云RAM用户的AccessKey ID</p></div>
                 <div class="config-section"><label class="config-label">AccessKey Secret</label><input type="password" class="config-input" id="voiceAksecret"><p class="hint">留空则保留原值</p></div>
                 <div class="config-section"><label class="config-label">TTS模板ID</label><input type="text" class="config-input" id="voiceTtsCode"><p class="hint">模板示例: 您有${count}条新招标信息，来源${source}</p></div>
                 <div class="config-section"><label class="config-label">被叫显号（可选）</label><input type="text" class="config-input" id="voiceShowNumber"><p class="hint">公共模式留空；专属模式填阿里云分配的号码</p></div>
-                <div class="config-section"><label class="config-label">🧪 测试手机号</label><input type="tel" class="config-input" id="voiceTestPhone" placeholder="输入手机号进行测试"></div>
+                <div class="config-section"><label class="config-label"><svg class="icon icon-sm" aria-hidden="true"><use href="#icon-test"></use></svg><span>测试手机号</span></label><input type="tel" class="config-input" id="voiceTestPhone" placeholder="输入手机号进行测试"></div>
             </div>
             <div class="modal-footer">
                 <button class="btn btn-outline modal-action" onclick="closeModal('voiceModal')">取消</button>
-                <button class="btn btn-warning modal-action" onclick="testVoice()">🧪 测试</button>
+                <button class="btn btn-warning modal-action" onclick="testVoice()"><svg class="icon icon-sm" aria-hidden="true"><use href="#icon-test"></use></svg><span>测试</span></button>
                 <button class="btn btn-primary modal-action" onclick="saveVoiceConfig()">保存</button>
             </div>
         </div>
@@ -211,43 +452,66 @@
 
     <div id="aiModal" class="modal">
         <div class="modal-content">
-            <div class="modal-header"><span>🤖 AI配置</span><button class="modal-close" onclick="closeModal('aiModal')">×</button></div>
+            <div class="modal-header"><span class="title-label"><svg class="icon" aria-hidden="true"><use href="#icon-bot"></use></svg><span>AI配置</span></span><button class="modal-close" onclick="closeModal('aiModal')" aria-label="关闭"><svg class="icon" aria-hidden="true"><use href="#icon-x"></use></svg></button></div>
             <div class="modal-body">
                 <div class="toggle-switch"><span>启用AI分析</span><label class="switch"><input type="checkbox" id="aiEnabled"><span class="slider"></span></label></div>
                 <div class="config-section"><label class="config-label">API地址</label><input type="text" class="config-input" id="aiUrl" value="https://api.deepseek.com/chat/completions"></div>
+                <div class="config-section"><label class="config-label">接口类型</label><select class="config-input" id="aiEndpointType"><option value="responses">responses</option><option value="chat_completions">chat_completions</option></select></div>
                 <div class="config-section"><label class="config-label">API Key</label><input type="password" class="config-input" id="aiKey"><p class="hint">留空则保留原值</p></div>
                 <div class="config-section"><label class="config-label">模型</label><input type="text" class="config-input" id="aiModel" value="deepseek-chat"></div>
             </div>
             <div class="modal-footer">
                 <button class="btn btn-outline modal-action" onclick="closeModal('aiModal')">取消</button>
-                <button class="btn btn-warning modal-action" onclick="testAi()">🧪 测试</button>
+                <button class="btn btn-warning modal-action" onclick="testAi()"><svg class="icon icon-sm" aria-hidden="true"><use href="#icon-test"></use></svg><span>测试</span></button>
                 <button class="btn btn-primary modal-action" onclick="saveAiConfig()">保存</button>
             </div>
         </div>
     </div>
 
-    <div id="customSiteModal" class="modal">
+    <div id="bulkReviewModal" class="modal">
         <div class="modal-content">
-            <div class="modal-header"><span>添加自定义网站</span><button class="modal-close" onclick="closeModal('customSiteModal')">×</button></div>
+            <div class="modal-header"><span>批量复核</span><button class="modal-close" onclick="closeModal('bulkReviewModal')" aria-label="关闭"><svg class="icon" aria-hidden="true"><use href="#icon-x"></use></svg></button></div>
             <div class="modal-body">
-                <div class="config-section"><label class="config-label">网站名称*</label><input type="text" class="config-input" id="customSiteName" placeholder="例如：某市公共资源交易中心"></div>
-                <div class="config-section"><label class="config-label">网站URL*</label><input type="text" class="config-input" id="customSiteUrl" placeholder="https://example.com/zfcg/search"></div>
-                <p class="hint">系统将尝试自动解析该页面的招标信息列表</p>
+                <div class="bulk-review-grid">
+                    <div class="config-section"><label class="config-label">适合性</label><select class="config-input" id="bulkFitStatus"><option value="">不修改</option></select></div>
+                    <div class="config-section"><label class="config-label">跟进决策</label><select class="config-input" id="bulkFollowDecision"><option value="">不修改</option></select></div>
+                    <div class="config-section"><label class="config-label">紧急度</label><select class="config-input" id="bulkUrgency"><option value="">不修改</option></select></div>
+                    <div class="config-section"><label class="config-label">项目阶段</label><select class="config-input" id="bulkProjectStage"><option value="">不修改</option></select></div>
+                    <div class="config-section config-section-wide"><label class="config-label">不跟进原因</label><div id="bulkNonFollowReasons" class="reason-list"></div></div>
+                    <div class="config-section config-section-wide"><label class="config-label">复核备注</label><textarea class="config-input" id="bulkReviewNotes" rows="4" placeholder="批量追加说明"></textarea></div>
+                </div>
             </div>
             <div class="modal-footer">
-                <button class="btn btn-outline modal-action" onclick="closeModal('customSiteModal')">取消</button>
-                <button class="btn btn-primary modal-action" onclick="saveCustomSite()">添加</button>
+                <button class="btn btn-outline modal-action" onclick="closeModal('bulkReviewModal')">取消</button>
+                <button class="btn btn-primary modal-action" onclick="saveBulkReview()">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="userModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header"><span id="userModalTitle">添加用户</span><button class="modal-close" onclick="closeModal('userModal')" aria-label="关闭"><svg class="icon" aria-hidden="true"><use href="#icon-x"></use></svg></button></div>
+            <div class="modal-body">
+                <div class="config-section"><label class="config-label">账号*</label><input type="text" class="config-input" id="userUsername" autocomplete="off"></div>
+                <div class="config-section"><label class="config-label">密码</label><input type="password" class="config-input" id="userPassword" autocomplete="new-password"><p class="hint">编辑用户时留空则不改密码</p></div>
+                <div class="config-section"><label class="config-label">角色</label><select class="config-input" id="userRole"><option value="user">普通用户</option><option value="admin">管理员</option></select></div>
+                <div class="toggle-switch"><span>启用此账号</span><label class="switch"><input type="checkbox" id="userActive" checked><span class="slider"></span></label></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline modal-action" onclick="closeModal('userModal')">取消</button>
+                <button class="btn btn-primary modal-action" onclick="saveUser()">保存</button>
             </div>
         </div>
     </div>
 
     <nav class="nav-tabs">
-        <button class="nav-tab active" data-page="home" onclick="showPage('home', this)"><span class="nav-tab-icon">🏠</span>控制台</button>
-        <button class="nav-tab" data-page="results" onclick="showPage('results', this)"><span class="nav-tab-icon">📋</span>结果</button>
-        <button class="nav-tab" data-page="sites" onclick="showPage('sites', this)"><span class="nav-tab-icon">🌐</span>网站</button>
-        <button class="nav-tab" data-page="contacts" onclick="showPage('contacts', this)"><span class="nav-tab-icon">👥</span>联系人</button>
-        <button class="nav-tab" data-page="config" onclick="showPage('config', this)"><span class="nav-tab-icon">⚙️</span>配置</button>
+        <button class="nav-tab active" data-page="home" onclick="showPage('home', this)"><span class="nav-tab-icon"><svg class="icon" aria-hidden="true"><use href="#icon-home"></use></svg></span><span>控制台</span></button>
+        <button class="nav-tab" data-page="results" onclick="showPage('results', this)"><span class="nav-tab-icon"><svg class="icon" aria-hidden="true"><use href="#icon-list"></use></svg></span><span>结果</span></button>
+        <button class="nav-tab" data-page="sites" onclick="showPage('sites', this)"><span class="nav-tab-icon"><svg class="icon" aria-hidden="true"><use href="#icon-globe"></use></svg></span><span>网站</span></button>
+        <button class="nav-tab" data-page="users" data-admin-only onclick="showPage('users', this)"><span class="nav-tab-icon"><svg class="icon" aria-hidden="true"><use href="#icon-users"></use></svg></span><span>用户</span></button>
+        <button class="nav-tab" data-page="config" onclick="showPage('config', this)"><span class="nav-tab-icon"><svg class="icon" aria-hidden="true"><use href="#icon-settings"></use></svg></span><span>配置</span></button>
     </nav>
+    </div>
 </body>
 
 </html>

@@ -22,20 +22,6 @@ from crawler.custom import CustomCrawler
 class BrowserModeWiringTests(unittest.TestCase):
     """Tests that MonitorCore uses the browser factory and falls back to CustomCrawler."""
 
-    def _make_monitor(self, custom_sites, use_selenium=True):
-        """Build a MonitorCore with minimal config; no built-in crawlers, no default sites."""
-        with patch.object(mc, "get_default_sites", return_value={}):
-            monitor = MonitorCore(
-                keywords=["test"],
-                notify_method="none",
-                crawler_overrides={
-                    "enabled_sites": [],
-                    "use_selenium": use_selenium,
-                    "custom_sites": custom_sites,
-                },
-            )
-        return monitor
-
     def test_factory_result_used_when_available(self):
         """When create_browser_crawler returns a sentinel, it should appear in crawlers."""
         sentinel = MagicMock(name="browser_crawler")
@@ -111,6 +97,28 @@ class BrowserModeWiringTests(unittest.TestCase):
         self.assertEqual(args[1], "上海招投标URL 001")
         self.assertEqual(args[2], "https://default.example.com")
         self.assertIn(sentinel, monitor.crawlers)
+
+    def test_default_sites_fall_back_to_custom_when_factory_returns_none(self):
+        """Default-sites loop: factory returns None -> CustomCrawler for that site."""
+        fake_default_sites = {
+            "url_list_001": {"name": "上海招投标URL 001", "url": "https://default.example.com"}
+        }
+
+        with patch.object(mc, "get_default_sites", return_value=fake_default_sites):
+            with patch.object(mc, "create_browser_crawler", return_value=None):
+                monitor = MonitorCore(
+                    keywords=["test"],
+                    notify_method="none",
+                    crawler_overrides={
+                        "enabled_sites": ["url_list_001"],
+                        "use_selenium": True,
+                    },
+                )
+
+        self.assertEqual(len(monitor.crawlers), 1)
+        self.assertIsInstance(monitor.crawlers[0], CustomCrawler)
+        self.assertEqual(monitor.crawlers[0].name, "上海招投标URL 001")
+        self.assertEqual(monitor.crawlers[0].url, "https://default.example.com")
 
     def test_factory_not_called_when_selenium_disabled(self):
         """When use_selenium=False, factory should NOT be called; CustomCrawler used directly."""

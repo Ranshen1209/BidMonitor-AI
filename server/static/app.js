@@ -1,6 +1,7 @@
 const API = '';
 const DEFAULT_AI_BASE_URL = 'https://api.sakrylle.com/v1';
 const DEFAULT_AI_MODEL = 'grok-4.20-fast';
+const SIDEBAR_COLLAPSED_KEY = 'bidmonitor.sidebarCollapsed';
 let currentConfig = {}, currentSites = [], currentUsers = [], currentUser = null;
 let currentResults = [], resultSettings = null, selectedResultIds = new Set(), activeResultId = null;
 let activeDetailManualOverrides = {};
@@ -60,6 +61,31 @@ function syncNavTabs() {
     });
 }
 
+function applySidebarCollapsedState(collapsed) {
+    const shell = document.getElementById('appShell');
+    if (!shell) return;
+    shell.classList.toggle('nav-collapsed', Boolean(collapsed));
+    const button = document.getElementById('sidebarCollapseButton');
+    if (button) {
+        const label = collapsed ? '展开导航' : '折叠导航';
+        button.setAttribute('aria-label', label);
+        button.setAttribute('title', label);
+        button.setAttribute('aria-expanded', String(!collapsed));
+    }
+}
+
+function initSidebarState() {
+    const collapsed = localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true';
+    applySidebarCollapsedState(collapsed);
+}
+
+function toggleSidebarCollapse() {
+    const shell = document.getElementById('appShell');
+    const collapsed = !(shell && shell.classList.contains('nav-collapsed'));
+    localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(collapsed));
+    applySidebarCollapsedState(collapsed);
+}
+
 async function showPage(name, tabElement) {
     syncNavTabs();
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
@@ -95,6 +121,7 @@ async function checkAuth() {
 function showAppShell() {
     document.getElementById('loginView').classList.remove('active');
     document.getElementById('appShell').classList.add('active');
+    initSidebarState();
     document.getElementById('currentUserLabel').textContent = currentUser ? `${currentUser.username} · ${currentUser.role === 'admin' ? '管理员' : '用户'}` : '';
     document.querySelectorAll('[data-admin-only]').forEach(el => {
         el.classList.toggle('is-hidden', !(currentUser && currentUser.role === 'admin'));

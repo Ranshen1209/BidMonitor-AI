@@ -1,6 +1,11 @@
 import json
 import logging
 
+try:
+    from .utils.logging_text import strip_log_icons
+except ImportError:  # pragma: no cover
+    from utils.logging_text import strip_log_icons
+
 class AIGuard:
     def __init__(self, config=None, log_callback=None):
         self.logger = logging.getLogger("AIGuard")
@@ -9,6 +14,7 @@ class AIGuard:
 
     def log(self, message):
         """输出日志到GUI和logger"""
+        message = strip_log_icons(message)
         if self.log_callback:
             self.log_callback(message)
         self.logger.info(message)
@@ -21,8 +27,59 @@ class AIGuard:
         self.api_key = config.get('api_key', '')
         self.base_url = config.get('base_url', 'https://cc.honoursoft.cn/').rstrip('/')
         self.model = config.get('model', 'claude-sonnet-4-5-20250929-thinking')
+        self.endpoint_type = config.get('endpoint_type') or self._infer_endpoint_type(self.base_url)
         self.enabled = config.get('enable', False)
         self.custom_prompt = config.get('prompt', '')
+        self.filter_keywords = config.get('filter_keywords') or []
+        self.must_contain_keywords = config.get('must_contain_keywords') or []
+        self.exclude_keywords = config.get('exclude_keywords') or []
+
+    def _build_system_prompt(self):
+        if self.custom_prompt:
+            return self.custom_prompt
+
+        filter_keywords = "、".join(self.filter_keywords) if self.filter_keywords else "当前配置的业务关键词"
+        must_contain = "、".join(self.must_contain_keywords) if self.must_contain_keywords else "无"
+        exclude = "、".join(self.exclude_keywords) if self.exclude_keywords else "无"
+        return (
+            "你是一个专业的招投标项目筛选专家。"
+            "请根据当前业务关键词判断该网页是否值得进入结果中心，不要臆造信息。\n\n"
+            f"业务关键词: {filter_keywords}\n"
+            f"必须包含线索: {must_contain}\n"
+            f"排除关键词: {exclude}\n\n"
+            "判为相关: 标题或内容明确涉及业务关键词对应的工程、采购、维保、改造、建设、服务、公告、意向或结果信息。\n"
+            "判为不相关: 广告页、平台推广页、纯新闻资讯、登录页、帮助页、完全无关行业、或命中排除关键词且没有有效业务线索。\n"
+            "返回JSON: {\"relevant\": true/false, \"reason\": \"50字以内的判断理由\"}"
+        )
+
+    def _infer_endpoint_type(self, base_url):
+        lower = (base_url or '').rstrip('/').lower()
+        if lower.endswith('/chat/completions'):
+            return 'chat_completions'
+        if 'honoursoft' in lower:
+            return 'claude_native'
+        return 'responses'
+
+    def _endpoint_url(self):
+        base_url = self.base_url.rstrip('/')
+        if self.endpoint_type == 'chat_completions' and base_url.endswith('/v1'):
+            return f"{base_url}/chat/completions"
+        if self.endpoint_type == 'responses' and base_url.endswith('/v1'):
+            return f"{base_url}/responses"
+        return base_url
+
+    def _extract_response_text(self, result):
+        if self.endpoint_type == 'responses':
+            output_text = result.get('output_text')
+            if output_text:
+                return output_text
+            output = result.get('output') or []
+            for item in output:
+                for content in item.get('content') or []:
+                    if content.get('text'):
+                        return content.get('text')
+            return ''
+        return result['choices'][0]['message']['content']
 
     def check_relevance(self, title, content="", raise_on_error=False):
         """
@@ -37,34 +94,16 @@ class AIGuard:
 
         self.log(f"🤖 [AI分析] 开始分析: {title[:40]}...")
 
-        system_prompt = (
-            "你是一个专业的招投标项目筛选专家。我们公司是做【光伏巡检无人机】和【风电巡检无人机】的，"
-            "产品主要用于光伏发电板巡检（含红外热斑检测）和风力发电设施巡检（含叶片检测）。\n\n"
-            "请判断该项目是否适合我们公司投标。\n\n"
-            "【符合条件】：\n"
-            "- 光伏电站/光伏发电项目的无人机巡检服务采购\n"
-            "- 风电场/风力发电项目的无人机巡检服务采购\n"
-            "- 光伏组件红外检测、热斑检测服务\n"
-            "- 风机叶片无人机检测服务\n"
-            "- 新能源电站无人机运维服务\n\n"
-            "【排除条件】：\n"
-            "- 单纯采购无人机设备（非服务）\n"
-            "- 测绘、航拍、农业植保、消防等其他领域无人机\n"
-            "- 光伏/风电的工程建设、设备安装（无巡检需求）\n"
-            "- 清洗、清洁、运输等非巡检服务\n"
-            "- 监理、咨询、设计类服务\n\n"
-            "返回JSON: {\"relevant\": true/false, \"reason\": \"50字以内的判断理由\"}"
-        )
-        
-        if self.custom_prompt:
-            system_prompt = self.custom_prompt
+        system_prompt = self._build_system_prompt()
 
         user_content = f"项目标题: {title}\n项目内容: {content[:800]}"
 
         # 判断是否使用 Claude 原生格式（基于模型名称和URL）
         is_claude_native = (
-            'claude' in self.model.lower() and 
-            'honoursoft' in self.base_url.lower()
+            self.endpoint_type == 'claude_native' or (
+                'claude' in self.model.lower() and
+                'honoursoft' in self.base_url.lower()
+            )
         )
         
         # 构造请求payload（自动兼容 Claude 和 OpenAI/DeepSeek 格式）
@@ -79,10 +118,19 @@ class AIGuard:
                 "temperature": 0.1,
                 "max_tokens": 300
             }
+        elif self.endpoint_type == 'responses':
+            payload = {
+                "model": self.model,
+                "instructions": system_prompt,
+                "input": user_content,
+                "temperature": 0.1,
+                "max_output_tokens": 300
+            }
         else:
             # OpenAI/DeepSeek 兼容格式：system 在 messages 数组中
             payload = {
                 "model": self.model,
+                "stream": False,
                 "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_content}
@@ -91,8 +139,7 @@ class AIGuard:
                 "max_tokens": 300
             }
 
-        # 直接使用用户提供的URL，不添加任何后缀
-        url = self.base_url.rstrip('/')
+        url = self._endpoint_url()
 
         self.log(f"🔗 [AI分析] 请求API: {self.base_url}")
         self.log(f"📦 [AI分析] 使用模型: {self.model}")
@@ -120,7 +167,7 @@ class AIGuard:
                         raise Exception(f"HTTP {resp.status_code}: {error_detail}")
                     
                     result = resp.json()
-                    ai_content = result['choices'][0]['message']['content']
+                    ai_content = self._extract_response_text(result)
                     
                     self.log(f"✅ [AI分析] 收到AI响应")
                     

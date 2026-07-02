@@ -17,6 +17,21 @@ import app
 
 
 class ServerConfigDefaultsTests(unittest.TestCase):
+    def test_app_logs_strip_visual_emoji_icons(self):
+        original_logs = app.app_state.logs
+        try:
+            app.app_state.logs = []
+
+            app.app_state.add_log("✅ AI测试成功，⏰ 下次检索时间: 17:03:28")
+
+            self.assertEqual(len(app.app_state.logs), 1)
+            self.assertIn("AI测试成功", app.app_state.logs[0])
+            self.assertIn("下次检索时间: 17:03:28", app.app_state.logs[0])
+            self.assertNotIn("✅", app.app_state.logs[0])
+            self.assertNotIn("⏰", app.app_state.logs[0])
+        finally:
+            app.app_state.logs = original_logs
+
     def test_default_config_targets_shanghai_url_list_first(self):
         with patch.object(app.os.path, "exists", return_value=False):
             config = app.load_config()

@@ -264,6 +264,7 @@ from monitor_core import MonitorCore, get_default_sites
 from database.storage import Storage, BidInfo
 from database.auth_storage import AuthStorage, SESSION_TTL_SECONDS
 from ai_guard import AIGuard
+from utils.logging_text import strip_log_icons
 from results.review import (
     DEFAULT_NON_FOLLOW_REASON_TAGS,
     FIT_STATUSES,
@@ -299,6 +300,7 @@ class AppState:
         self.progress_site = ""    # 当前正在爬取的网站名称
         
     def add_log(self, message: str):
+        message = strip_log_icons(message)
         timestamp = datetime.now().strftime("%H:%M:%S")
         log_entry = f"[{timestamp}] {message}"
         self.logs.append(log_entry)
@@ -622,8 +624,11 @@ async def run_monitor_task():
         # AI 配置
         ai_config = None
         if config.get('ai_enabled') and config.get('ai_config'):
-            ai_config = config['ai_config']
+            ai_config = copy.deepcopy(config['ai_config'])
             ai_config['enable'] = True
+            ai_config['filter_keywords'] = keywords
+            ai_config['exclude_keywords'] = exclude
+            ai_config['must_contain_keywords'] = must_contain
         
         # 创建监控核心
         monitor = MonitorCore(
@@ -636,6 +641,7 @@ async def run_monitor_task():
                 'enabled_sites': config.get('enabled_sites', []),
                 'use_selenium': config.get('use_selenium', False),
                 'csv_url_sources': config.get('csv_url_sources', []),
+                'site_metadata': config.get('site_metadata', {}),
             }
         )
         

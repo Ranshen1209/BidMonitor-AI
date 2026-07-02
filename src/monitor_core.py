@@ -13,6 +13,7 @@ try:
     from .database.storage import Storage, BidInfo
     from .matcher.keyword import KeywordMatcher
     from .results.ai_extractor import enrich_new_bid
+    from .utils.logging_text import strip_log_icons
 
     from .crawler.ccgp import CCGPCrawler
     from .crawler.chinabidding import ChinaBiddingCrawler
@@ -30,6 +31,7 @@ except ImportError:
     from database.storage import Storage, BidInfo
     from matcher.keyword import KeywordMatcher
     from results.ai_extractor import enrich_new_bid
+    from utils.logging_text import strip_log_icons
 
     from crawler.ccgp import CCGPCrawler
     from crawler.chinabidding import ChinaBiddingCrawler
@@ -181,6 +183,8 @@ class MonitorCore:
             self.config['custom_sites'] = self.crawler_overrides['custom_sites']
         if 'csv_url_sources' in self.crawler_overrides:
             self.config['csv_url_sources'] = self.crawler_overrides['csv_url_sources']
+        if 'site_metadata' in self.crawler_overrides:
+            self.config['site_metadata'] = self.crawler_overrides['site_metadata']
     
     def clear_data(self):
         """清空所有历史数据"""
@@ -239,20 +243,22 @@ class MonitorCore:
         for key in enabled:
             if key in default_sites and key not in crawler_classes:
                 site = default_sites[key]
+                site_metadata = self.config.get('site_metadata', {}).get(key, {})
+                site_name = site_metadata.get('display_name') or site['name']
                 try:
                     if use_selenium:
-                        crawler = create_browser_crawler(crawler_config, site['name'], site['url'], headless=True)
+                        crawler = create_browser_crawler(crawler_config, site_name, site['url'], headless=True)
                         if crawler is None:
-                            self.log(f"[WARN] 无浏览器后端,回落 requests: {site['name']}")
-                            crawler = CustomCrawler(crawler_config, site['name'], site['url'])
+                            self.log(f"[WARN] 无浏览器后端,回落 requests: {site_name}")
+                            crawler = CustomCrawler(crawler_config, site_name, site['url'])
                         else:
-                            self.log(f"[OK] Loaded site (browser): {site['name']}")
+                            self.log(f"[OK] Loaded site (browser): {site_name}")
                     else:
-                        crawler = CustomCrawler(crawler_config, site['name'], site['url'])
-                        self.log(f"[OK] Loaded site: {site['name']}")
+                        crawler = CustomCrawler(crawler_config, site_name, site['url'])
+                        self.log(f"[OK] Loaded site: {site_name}")
                     crawlers.append(crawler)
                 except Exception as e:
-                    self.log(f"[WARN] Failed to load site {site['name']}: {e}")
+                    self.log(f"[WARN] Failed to load site {site_name}: {e}")
         
         # 3. 加载用户自定义爬虫
         custom_sites = self.config.get('custom_sites', []) if self.config.get('enable_custom_sites', False) else []
@@ -298,6 +304,7 @@ class MonitorCore:
     
     def log(self, message: str):
         """记录日志"""
+        message = strip_log_icons(message)
         logging.info(message)
         self.log_callback(message)
     

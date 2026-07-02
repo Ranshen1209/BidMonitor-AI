@@ -58,6 +58,27 @@ class MonitorCoreUrlSourcesTests(unittest.TestCase):
             self.assertEqual(url_crawlers[0].name, "上海招投标URL清单")
             self.assertEqual(url_crawlers[0].get_list_urls(), ["https://example.com"])
 
+    def test_default_site_logs_use_configured_display_name(self):
+        fake_default_sites = {
+            "url_list_003": {"name": "上海招投标URL 003", "url": "https://example.com/default"}
+        }
+
+        with patch.object(monitor_core_module, "get_default_sites", return_value=fake_default_sites):
+            monitor = MonitorCore(
+                keywords=["弱电"],
+                notify_method="none",
+                crawler_overrides={
+                    "enabled_sites": ["url_list_003"],
+                    "use_selenium": False,
+                    "site_metadata": {
+                        "url_list_003": {"display_name": "上海市公共资源交易中心"}
+                    },
+                },
+            )
+
+        self.assertEqual(len(monitor.crawlers), 1)
+        self.assertEqual(monitor.crawlers[0].name, "上海市公共资源交易中心")
+
     @patch.object(UrlListCrawler, "_request_url")
     def test_monitor_core_run_once_saves_url_list_results_to_storage(self, mock_request_url):
         mock_request_url.return_value = (

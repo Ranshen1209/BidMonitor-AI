@@ -103,7 +103,7 @@ CRAWL_RUN_COLUMNS = {
 
 CRAWL_RUN_MIGRATION_COLUMNS = {
     **CRAWL_RUN_COLUMNS,
-    "source_id": "TEXT DEFAULT ''",
+    "source_id": "TEXT NOT NULL DEFAULT ''",
 }
 
 
@@ -588,25 +588,33 @@ class Storage:
 
     def finish_crawl_run(self, run_id: int, status: str, counts: Optional[dict] = None) -> None:
         counts = counts or {}
+        assignments = [
+            "finished_at = ?",
+            "status = ?",
+            "error_message = ?",
+        ]
+        params = [
+            datetime.utcnow().isoformat(timespec="seconds"),
+            status,
+            str(counts.get("error_message", ""))[:500],
+        ]
+        for column in (
+            "fetched_count",
+            "candidate_count",
+            "parsed_count",
+            "inserted_count",
+            "updated_count",
+            "skipped_count",
+            "error_count",
+        ):
+            if column in counts:
+                assignments.append(f"{column} = ?")
+                params.append(int(counts[column]))
+        params.append(run_id)
         conn = self._get_connection()
         conn.execute(
-            """
-            UPDATE crawl_runs
-            SET finished_at = ?, status = ?, fetched_count = ?, candidate_count = ?,
-                parsed_count = ?, updated_count = ?, error_count = ?, error_message = ?
-            WHERE id = ?
-            """,
-            (
-                datetime.utcnow().isoformat(timespec="seconds"),
-                status,
-                int(counts.get("fetched_count", 0)),
-                int(counts.get("candidate_count", 0)),
-                int(counts.get("parsed_count", 0)),
-                int(counts.get("updated_count", 0)),
-                int(counts.get("error_count", 0)),
-                str(counts.get("error_message", ""))[:500],
-                run_id,
-            ),
+            f"UPDATE crawl_runs SET {', '.join(assignments)} WHERE id = ?",
+            params,
         )
         conn.commit()
 

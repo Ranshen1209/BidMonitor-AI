@@ -673,6 +673,43 @@ class TopologySourceAdapterTests(unittest.TestCase):
         self.assertEqual(result.diagnostics[-1].get("status"), "partial")
 
     @patch("crawler.url_list.UrlListCrawler._request_url")
+    def test_collect_treats_unexpected_entry_exception_as_real_failure(self, mock_request_url):
+        called_urls = []
+
+        def fake_request(url):
+            called_urls.append(url)
+            if url == "https://portal.example.com/":
+                raise AttributeError("programmer bug")
+            if url == "https://portal.example.com/notices/":
+                return (
+                    "<html><body><a href='/detail/42'>上海安防工程公开招标公告</a></body></html>",
+                    200,
+                    "OK",
+                )
+            if url == "https://portal.example.com/detail/42":
+                return (
+                    "<html><body><h1>上海安防工程公开招标公告</h1>"
+                    "<p>发布时间：2026-07-02</p>"
+                    "<p>采购单位：上海测试单位。</p>"
+                    "<p>公告正文：本项目采购安防监控系统。</p></body></html>",
+                    200,
+                    "OK",
+                )
+            raise AssertionError(f"unexpected url {url}")
+
+        mock_request_url.side_effect = fake_request
+
+        result = TopologySourceAdapter({"request_delay": 0, "domain_delay": 0}).collect(make_source())
+
+        self.assertEqual(result.notices, [])
+        self.assertEqual(result.error_count, 1)
+        self.assertTrue(
+            any("AttributeError" in error and "programmer bug" in error for error in result.errors)
+        )
+        self.assertEqual(result.diagnostics[-1].get("status"), "failed")
+        self.assertEqual(called_urls, ["https://portal.example.com/"])
+
+    @patch("crawler.url_list.UrlListCrawler._request_url")
     def test_collect_continues_seed_traversal_after_entry_http_error(self, mock_request_url):
         def fake_request(url):
             if url == "https://portal.example.com/":
@@ -805,6 +842,63 @@ class TopologySourceAdapterTests(unittest.TestCase):
                 for diagnostic in result.diagnostics
             )
         )
+
+    @patch("crawler.url_list.UrlListCrawler._request_url")
+    @patch("crawler.url_list.UrlListCrawler._request_url_with_browser")
+    def test_collect_does_not_account_for_browser_recovered_candidate_request_exception(
+        self,
+        mock_browser_request,
+        mock_request_url,
+    ):
+        source = make_source()
+        source.topology["seed_urls"] = []
+        source.topology["detail_url_regex"] = [r"/detail/\d+$"]
+        detail_url = "https://portal.example.com/detail/42"
+
+        def fake_request(url):
+            if url == "https://portal.example.com/":
+                return (
+                    "<html><body><a href='/detail/42'>上海安防工程公开招标公告</a></body></html>",
+                    200,
+                    "OK",
+                )
+            if url == detail_url:
+                raise requests.exceptions.Timeout("timed out")
+            raise AssertionError(f"unexpected url {url}")
+
+        def fake_browser_request(url):
+            if url == detail_url:
+                return (
+                    "<html><body><h1>上海安防工程公开招标公告</h1>"
+                    "<p>发布时间：2026-07-02</p>"
+                    "<p>采购单位：上海测试单位。</p>"
+                    "<p>公告正文：本项目采购安防监控系统。</p></body></html>",
+                    200,
+                    "Browser",
+                )
+            raise AssertionError(f"unexpected browser url {url}")
+
+        mock_request_url.side_effect = fake_request
+        mock_browser_request.side_effect = fake_browser_request
+
+        result = TopologySourceAdapter(
+            {"request_delay": 0, "domain_delay": 0, "use_selenium": True}
+        ).collect(source)
+
+        self.assertEqual(len(result.notices), 1)
+        self.assertEqual(result.notices[0].detail_url, detail_url)
+        self.assertEqual(result.candidate_count, 1)
+        self.assertEqual(result.skipped_count, 0)
+        self.assertEqual(result.error_count, 0)
+        self.assertFalse(
+            any(
+                diagnostic.get("url") == detail_url
+                and diagnostic.get("status") == "failed"
+                and "timed out" in diagnostic.get("reason", "")
+                for diagnostic in result.diagnostics
+            )
+        )
+        mock_browser_request.assert_called_once_with(detail_url)
 
     @patch("crawler.url_list.UrlListCrawler._request_url")
     def test_collect_accounts_for_failed_followed_non_detail_candidate_fetch(self, mock_request_url):

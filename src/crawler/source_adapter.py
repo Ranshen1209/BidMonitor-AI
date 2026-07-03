@@ -23,6 +23,7 @@ try:
         TYPE_FIELDS,
         URL_FIELDS,
         UrlListCrawler,
+        requests as url_list_requests,
     )
 except ImportError:  # pragma: no cover
     from crawler.source_models import (
@@ -41,6 +42,7 @@ except ImportError:  # pragma: no cover
         TYPE_FIELDS,
         URL_FIELDS,
         UrlListCrawler,
+        requests as url_list_requests,
     )
 
 
@@ -66,7 +68,7 @@ class TopologySourceAdapter:
             crawler._respect_rate_limit(source.url)
             try:
                 html, status_code, status_text = crawler._request_url(source.url)
-            except Exception as exc:
+            except url_list_requests.RequestException as exc:
                 message = f"{exc.__class__.__name__}: {exc}"
                 result.errors.append(message)
                 result.error_count += 1
@@ -109,6 +111,10 @@ class TopologySourceAdapter:
             followed_candidate_urls: set[str] = set()
             original_request_url = crawler._request_url
             original_should_follow_candidate = crawler._should_follow_candidate
+            had_topology_fetch_failure_callback = hasattr(crawler, "_topology_fetch_failure_callback")
+            original_topology_fetch_failure_callback = getattr(
+                crawler, "_topology_fetch_failure_callback", None
+            )
             topology_seed_urls = {
                 link.get("url", "").split("#", 1)[0] for link in crawler._topology_seed_links(source.url)
             }
@@ -140,33 +146,23 @@ class TopologySourceAdapter:
                     }
                 )
 
+            def record_topology_fetch_failure(
+                page_url: str,
+                reason: str,
+                status_code: int = 0,
+                **_context: Any,
+            ) -> None:
+                record_candidate_failure(page_url, crawler._classify_url(page_url), reason, status_code)
+
             def request_url_and_collect_json(url: str):
                 normalized_url = normalize_notice_url(url)
                 if normalized_url and normalized_url in admitted_structured_urls:
                     return "", 204, "Skipped admitted structured URL"
                 request_url_and_collect_json.call_count += 1
                 response_rule = crawler._classify_url(url)
-                try:
-                    response_html, response_status, response_text = original_request_url(url)
-                except Exception as exc:
-                    record_candidate_failure(
-                        url,
-                        response_rule,
-                        f"{exc.__class__.__name__}: {exc}",
-                    )
-                    raise
+                response_html, response_status, response_text = original_request_url(url)
                 response_blocked = response_status < 400 and crawler._contains_blocked_sign(response_html, url)
                 if response_status >= 400 or response_blocked:
-                    if response_status >= 400:
-                        reason = f"HTTP {response_status}: {response_text or 'detail fetch failed'}"
-                    else:
-                        reason = crawler._blocked_reason(response_html, url)
-                    record_candidate_failure(
-                        url,
-                        response_rule,
-                        reason,
-                        response_status,
-                    )
                     return response_html, response_status, response_text
                 if response_status < 400:
                     response_structured_bids = self._structured_bids_from_payload(
@@ -191,6 +187,7 @@ class TopologySourceAdapter:
             request_url_and_collect_json.call_count = request_count_before + initial_fetch_count
             crawler._request_url = request_url_and_collect_json
             crawler._should_follow_candidate = should_follow_unadmitted_candidate
+            crawler._topology_fetch_failure_callback = record_topology_fetch_failure
             try:
                 legacy_bids = crawler._crawl_topology_from_url(
                     source.url,
@@ -203,6 +200,10 @@ class TopologySourceAdapter:
             finally:
                 crawler._request_url = original_request_url
                 crawler._should_follow_candidate = original_should_follow_candidate
+                if had_topology_fetch_failure_callback:
+                    crawler._topology_fetch_failure_callback = original_topology_fetch_failure_callback
+                elif hasattr(crawler, "_topology_fetch_failure_callback"):
+                    delattr(crawler, "_topology_fetch_failure_callback")
             if request_delta > 0:
                 result.fetched_count = request_delta
             result.diagnostics.extend(detail_failures)

@@ -629,24 +629,48 @@ class UrlListCrawler(BaseCrawler):
                         self._respect_rate_limit(page_url)
                         html, status_code, _status_text = self._request_url(page_url)
                     except Exception as exc:
+                        reason = f"{exc.__class__.__name__}: {exc}"
                         if self._browser_mode_enabled():
                             browser_result = self._request_url_with_browser(page_url)
                             if browser_result:
                                 html, status_code, _status_text = browser_result
                             else:
                                 self.logger.debug(f"[{self.name}] topology browser fallback failed {page_url}: {exc}")
+                                self._record_topology_fetch_failure(page_url, reason, exc=exc)
                                 continue
                         else:
                             self.logger.debug(f"[{self.name}] topology fetch failed {page_url}: {exc}")
+                            self._record_topology_fetch_failure(page_url, reason, exc=exc)
                             continue
                 if status_code >= 400 or self._contains_blocked_sign(html, page_url):
+                    failure_reason = self._topology_fetch_failure_reason(page_url, html, status_code, _status_text)
                     if self._browser_mode_enabled():
                         browser_result = self._request_url_with_browser(page_url)
                         if browser_result:
                             html, status_code, _status_text = browser_result
+                            if status_code >= 400 or self._contains_blocked_sign(html, page_url):
+                                self._record_topology_fetch_failure(
+                                    page_url,
+                                    self._topology_fetch_failure_reason(page_url, html, status_code, _status_text),
+                                    status_code,
+                                    html=html,
+                                )
+                                continue
                         else:
+                            self._record_topology_fetch_failure(
+                                page_url,
+                                failure_reason,
+                                status_code,
+                                html=html,
+                            )
                             continue
                     else:
+                        self._record_topology_fetch_failure(
+                            page_url,
+                            failure_reason,
+                            status_code,
+                            html=html,
+                        )
                         continue
             else:
                 html = prefetched_html
@@ -694,6 +718,29 @@ class UrlListCrawler(BaseCrawler):
                 queue.append((candidate_url, depth + 1, None, link.get("title", "")))
 
         return bids
+
+    def _topology_fetch_failure_reason(
+        self,
+        page_url: str,
+        html: str,
+        status_code: int,
+        status_text: str,
+    ) -> str:
+        if status_code >= 400:
+            return f"HTTP {status_code}: {status_text or 'detail fetch failed'}"
+        return self._blocked_reason(html, page_url)
+
+    def _record_topology_fetch_failure(
+        self,
+        page_url: str,
+        reason: str,
+        status_code: int = 0,
+        html: str = "",
+        exc: Exception | None = None,
+    ) -> None:
+        callback = getattr(self, "_topology_fetch_failure_callback", None)
+        if callable(callback):
+            callback(page_url, reason, status_code=status_code, html=html, exc=exc)
 
     def _merge_candidate_links(self, *groups: List[Dict[str, str]]) -> List[Dict[str, str]]:
         merged: List[Dict[str, str]] = []

@@ -19,16 +19,25 @@ class CrawlRunner:
 
     def run_source(self, source: Source, stop_event=None):
         run_id = self.storage.start_crawl_run(source.id, source.name)
-        result = self.adapter.collect(source, stop_event=stop_event)
-        status = self._status_for(result)
-        self.storage.finish_crawl_run(run_id, status, counts=self._counts_for(result))
+        try:
+            result = self.adapter.collect(source, stop_event=stop_event)
+        except Exception as exc:
+            self.storage.finish_crawl_run(run_id, "failed", counts=self._failure_counts(error=exc))
+            return []
 
         bids = []
-        for notice in result.notices:
-            bid = notice.to_bid_info()
-            bid.crawl_run_id = run_id
-            bid.source_id = source.id
-            bids.append(bid)
+        try:
+            for notice in result.notices:
+                bid = notice.to_bid_info()
+                bid.crawl_run_id = run_id
+                bid.source_id = source.id
+                bids.append(bid)
+        except Exception as exc:
+            self.storage.finish_crawl_run(run_id, "failed", counts=self._failure_counts(result, exc))
+            return []
+
+        status = self._status_for(result)
+        self.storage.finish_crawl_run(run_id, status, counts=self._counts_for(result))
         return bids
 
     def _status_for(self, result: CrawlResult) -> str:
@@ -52,6 +61,15 @@ class CrawlRunner:
             "error_count": result.error_count,
             "error_message": error_message,
         }
+
+    def _failure_counts(self, result: CrawlResult | None = None, error: Exception | None = None) -> dict[str, Any]:
+        counts = self._counts_for(result) if result is not None else {}
+        existing_errors = list(result.errors) if result is not None else []
+        if error is not None:
+            existing_errors.append(str(error))
+        counts["error_count"] = (result.error_count if result is not None else 0) + 1
+        counts["error_message"] = "; ".join(existing_errors)[:500]
+        return counts
 
 
 class SourceBackedCrawler:

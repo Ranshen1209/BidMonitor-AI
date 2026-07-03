@@ -149,6 +149,8 @@ class BidInfo:
     ai_extract_error: str = ""
     detail_fetch_error: str = ""
     updated_at: str = ""
+    crawl_run_id: Optional[int] = None
+    source_id: str = ""
 
     def __post_init__(self):
         if self.ai_extracted_data is None:

@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 
 try:
     from .utils.logging_text import strip_log_icons
@@ -80,6 +81,68 @@ class AIGuard:
                         return content.get('text')
             return ''
         return result['choices'][0]['message']['content']
+
+    def _extract_json_text(self, ai_content):
+        """Extract a JSON object from common model response shapes."""
+        text = (ai_content or "").strip()
+        fenced = re.search(r"```(?:json)?\s*(.*?)\s*```", text, flags=re.IGNORECASE | re.DOTALL)
+        if fenced:
+            return fenced.group(1).strip()
+        if "{" in text and "}" in text:
+            start = text.find("{")
+            end = text.rfind("}") + 1
+            return text[start:end]
+        return text
+
+    def _coerce_relevant_value(self, value):
+        """Normalize model boolean output; string 'false' must not become truthy."""
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return bool(value)
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            negative_values = {"false", "no", "n", "0", "否", "不", "不相关", "无关", "不符合", "非相关"}
+            positive_values = {"true", "yes", "y", "1", "是", "相关", "符合"}
+            if normalized in negative_values:
+                return False
+            if normalized in positive_values:
+                return True
+        return False
+
+    def _infer_relevance_from_text(self, ai_content):
+        """Best-effort fallback for non-JSON model output, checking negative signals first."""
+        text = (ai_content or "").strip()
+        lower = text.lower()
+
+        negative_patterns = [
+            r"\brelevant\s*[:：]\s*false\b",
+            r"\bfalse\b",
+            r"\bnot\s+relevant\b",
+            r"\birrelevant\b",
+            r"不\s*相关",
+            r"无关",
+            r"不\s*符合",
+            r"非相关",
+            r"无需跟进",
+            r"不建议",
+        ]
+        if any(re.search(pattern, lower) for pattern in negative_patterns):
+            return False
+
+        positive_patterns = [
+            r"\brelevant\s*[:：]\s*true\b",
+            r"\btrue\b",
+            r"相关",
+            r"符合",
+            r"建议跟进",
+            r"值得",
+        ]
+        if any(re.search(pattern, lower) for pattern in positive_patterns):
+            return True
+
+        # AI output was malformed and ambiguous. Do not drop a bid solely on that basis.
+        return True
 
     def check_relevance(self, title, content="", raise_on_error=False):
         """
@@ -173,20 +236,9 @@ class AIGuard:
                     
                     # 解析AI返回的JSON
                     try:
-                        # 尝试从响应中提取JSON
-                        if '```json' in ai_content:
-                            json_str = ai_content.split('```json')[1].split('```')[0].strip()
-                        elif '```' in ai_content:
-                            json_str = ai_content.split('```')[1].split('```')[0].strip()
-                        elif '{' in ai_content and '}' in ai_content:
-                            start = ai_content.find('{')
-                            end = ai_content.rfind('}') + 1
-                            json_str = ai_content[start:end]
-                        else:
-                            json_str = ai_content
-                            
+                        json_str = self._extract_json_text(ai_content)
                         analysis = json.loads(json_str)
-                        is_relevant = analysis.get('relevant', False)
+                        is_relevant = self._coerce_relevant_value(analysis.get('relevant', False))
                         reason = analysis.get('reason', 'AI未提供理由')
                         
                         if is_relevant:
@@ -199,7 +251,11 @@ class AIGuard:
                     except json.JSONDecodeError:
                         # 如果无法解析JSON，尝试从文本判断
                         self.log(f"⚠️ [AI分析] 返回非标准JSON，尝试文本分析")
-                        is_relevant = "true" in ai_content.lower() or "相关" in ai_content or "是" in ai_content[:20]
+                        is_relevant = self._infer_relevance_from_text(ai_content)
+                        if is_relevant:
+                            self.log(f"✅ [AI判定] 相关 - {ai_content[:80]}")
+                        else:
+                            self.log(f"🚫 [AI判定] 不相关 - {ai_content[:80]}")
                         return is_relevant, ai_content[:80]
                         
                 except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:

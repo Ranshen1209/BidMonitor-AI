@@ -56,6 +56,52 @@ class AIGuardTests(unittest.TestCase):
         self.assertEqual(post.call_args.args[0], "https://api.example.com/v1/responses")
         self.assertIn("input", post.call_args.kwargs["json"])
 
+    def test_string_false_relevant_value_is_treated_as_false(self):
+        response = Mock()
+        response.status_code = 200
+        response.json.return_value = {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps({"relevant": "false", "reason": "纯平台推广页"}, ensure_ascii=False)
+                    }
+                }
+            ]
+        }
+        config = {
+            "enable": True,
+            "base_url": "https://api.example.com/v1",
+            "api_key": "secret",
+            "model": "grok-4.20-fast",
+            "endpoint_type": "chat_completions",
+        }
+
+        with patch("requests.post", return_value=response):
+            relevant, reason = AIGuard(config).check_relevance("平台首页", "招标采购平台介绍")
+
+        self.assertFalse(relevant)
+        self.assertEqual(reason, "纯平台推广页")
+
+    def test_non_json_negative_text_checks_not_relevant_before_relevant(self):
+        response = Mock()
+        response.status_code = 200
+        response.json.return_value = {
+            "choices": [{"message": {"content": "不相关：这是新闻资讯，不是招标公告"}}]
+        }
+        config = {
+            "enable": True,
+            "base_url": "https://api.example.com/v1",
+            "api_key": "secret",
+            "model": "grok-4.20-fast",
+            "endpoint_type": "chat_completions",
+        }
+
+        with patch("requests.post", return_value=response):
+            relevant, reason = AIGuard(config).check_relevance("行业新闻", "智慧楼宇趋势")
+
+        self.assertFalse(relevant)
+        self.assertIn("不相关", reason)
+
     def test_default_prompt_uses_configured_business_keywords_not_legacy_drone_domain(self):
         response = Mock()
         response.status_code = 200

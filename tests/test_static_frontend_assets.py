@@ -20,8 +20,8 @@ class StaticFrontendAssetsTests(unittest.TestCase):
     def test_index_uses_external_static_assets(self):
         html = self.read("index.html")
 
-        self.assertIn('<link rel="stylesheet" href="/static/styles.css">', html)
-        self.assertIn('<script defer src="/static/app.js"></script>', html)
+        self.assertRegex(html, r'<link rel="stylesheet" href="/static/styles\.css\?v=[^"]+">')
+        self.assertRegex(html, r'<script defer src="/static/app\.js\?v=[^"]+"></script>')
         self.assertNotIn("<style>", html)
         self.assertNotIn("</style>", html)
         self.assertNotIn("<script>\n        const API", html)
@@ -129,9 +129,12 @@ class StaticFrontendAssetsTests(unittest.TestCase):
         self.assertRegex(css, r"\.result-filter-bar\s*\{[^}]*grid-template-columns:\s*repeat\(auto-fit,\s*minmax\(140px,\s*1fr\)\)")
         self.assertRegex(css, r"\.filter-search\s*\{[^}]*grid-column:\s*span\s+2")
         self.assertRegex(css, r"\.result-filter-action\s*\{[^}]*width:\s*100%")
-        self.assertRegex(css, r"\.results-shell\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+minmax\(340px,\s*520px\)")
+        self.assertRegex(css, r"\.results-shell\s*\{[^}]*width:\s*100%")
+        self.assertRegex(css, r"\.results-shell\s*\{[^}]*min-width:\s*0")
+        self.assertRegex(css, r"\.results-table-wrap\s*\{[^}]*width:\s*100%")
         self.assertRegex(css, r"\.results-table-wrap\s*\{[^}]*min-width:\s*0")
-        self.assertRegex(css, r"\.result-detail-panel\s*\{[^}]*min-width:\s*0")
+        self.assertRegex(css, r"\.result-detail-modal\s*\{[^}]*align-items:\s*center")
+        self.assertRegex(css, r"\.result-detail-panel\s*\{[^}]*max-height:\s*calc\(100vh - 48px\)")
 
     def test_behavioral_dom_contract_is_preserved(self):
         html = self.read("index.html")
@@ -151,9 +154,11 @@ class StaticFrontendAssetsTests(unittest.TestCase):
             "progressSite",
             "btnStart",
             "btnStop",
+            "copyLogsButton",
             "logsContainer",
             "resultFilterBar",
             "resultsTableBody",
+            "resultDetailModal",
             "resultDetailPanel",
             "bulkReviewModal",
             "bulkFitStatus",
@@ -199,6 +204,23 @@ class StaticFrontendAssetsTests(unittest.TestCase):
         self.assertIn("/api/auth/me", js)
         self.assertIn("/api/auth/login", js)
         self.assertIn("/api/auth/logout", js)
+
+    def test_logs_panel_can_copy_visible_logs(self):
+        html = self.read("index.html")
+        js = self.read("app.js")
+        css = self.read("styles.css")
+
+        self.assertIn('id="copyLogsButton"', html)
+        self.assertIn('onclick="copyLogs()"', html)
+        self.assertIn('<use href="#icon-copy"></use>', html)
+        self.assertIn("function getLogTextForCopy", js)
+        self.assertIn("document.querySelectorAll('#logsContainer .log-line')", js)
+        self.assertIn("navigator.clipboard.writeText", js)
+        self.assertIn("function copyLogs", js)
+        self.assertIn("const LOG_FETCH_LIMIT = 2000", js)
+        self.assertIn("lastLogsSignature", js)
+        self.assertIn(".log-actions", css)
+        self.assertIn(".clipboard-buffer", css)
 
     def test_frontend_has_in_app_login_and_lightweight_user_management(self):
         html = self.read("index.html")
@@ -261,6 +283,26 @@ class StaticFrontendAssetsTests(unittest.TestCase):
         ]:
             self.assertIn(selector, css)
 
+    def test_search_config_lives_above_builtin_sites(self):
+        html = self.read("index.html")
+
+        page_sites_start = html.index('<div id="page-sites" class="page">')
+        page_config_start = html.index('<div id="page-config" class="page">')
+        page_sites_html = html[page_sites_start:page_config_start]
+
+        self.assertIn('<span>搜索配置</span>', page_sites_html)
+        self.assertIn('<span>内置网站</span>', page_sites_html)
+        self.assertLess(
+            page_sites_html.index('<span>搜索配置</span>'),
+            page_sites_html.index('<span>内置网站</span>'),
+        )
+        self.assertIn('id="cfgKeywords"', page_sites_html)
+        self.assertIn('id="cfgExclude"', page_sites_html)
+        self.assertIn('id="cfgMustContain"', page_sites_html)
+        self.assertIn('id="cfgInterval"', page_sites_html)
+        self.assertIn('id="cfgSelenium"', page_sites_html)
+        self.assertNotIn('id="cfgKeywords"', html[page_config_start:])
+
     def test_site_access_status_options_match_backend_contract(self):
         js = self.read("app.js")
 
@@ -299,13 +341,14 @@ class StaticFrontendAssetsTests(unittest.TestCase):
             "来源",
         ]:
             self.assertIn(header, html)
-        for hook in ["resultsTableBody", "resultDetailPanel", "bulkReviewModal", "resultFilterBar"]:
+        for hook in ["resultsTableBody", "resultDetailModal", "resultDetailPanel", "bulkReviewModal", "resultFilterBar"]:
             self.assertIn(f'id="{hook}"', html)
         for fn in [
             "loadResultSettings",
             "loadResults",
             "renderResultsTable",
             "openResultDetail",
+            "closeResultDetail",
             "saveResultReview",
             "openBulkReview",
             "saveBulkReview",
@@ -313,6 +356,10 @@ class StaticFrontendAssetsTests(unittest.TestCase):
             self.assertIn(f"function {fn}", js)
         for endpoint in ["/api/result-settings", "/api/results/bulk-review", "/api/results/"]:
             self.assertIn(endpoint, js)
+        self.assertIn('onclick="openResultDetail(${item.id})"', js)
+        self.assertIn('onclick="event.stopPropagation()"', js)
+        self.assertIn('onclick="event.stopPropagation(); openResultDetail(${item.id})"', js)
+        self.assertIn('rel="noopener noreferrer" onclick="event.stopPropagation()"', js)
         for selector in [".results-table", ".result-detail-panel", ".bulk-review-grid", ".result-filter-bar"]:
             self.assertIn(selector, css)
 

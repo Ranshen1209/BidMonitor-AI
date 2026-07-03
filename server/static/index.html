@@ -6,8 +6,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>BidMonitor 招标监控</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-    <link rel="stylesheet" href="/static/styles.css">
-    <script defer src="/static/app.js"></script>
+    <link rel="stylesheet" href="/static/styles.css?v=20260703-results-log-ui">
+    <script defer src="/static/app.js?v=20260703-results-log-ui"></script>
 </head>
 
 <body>
@@ -82,6 +82,10 @@
             <path d="M5 4h12l2 2v14H5Z"></path>
             <path d="M8 4v6h8V4"></path>
             <path d="M8 20v-6h8v6"></path>
+        </symbol>
+        <symbol id="icon-copy" viewBox="0 0 24 24">
+            <rect x="9" y="9" width="11" height="11" rx="2"></rect>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
         </symbol>
         <symbol id="icon-plus" viewBox="0 0 24 24">
             <path d="M12 5v14"></path>
@@ -247,7 +251,10 @@
             <div class="card panel-logs">
                 <div class="u-title-split">
                     <span class="title-label"><svg class="icon" aria-hidden="true"><use href="#icon-list"></use></svg><span>实时日志</span></span>
-                    <button class="btn btn-sm btn-outline" onclick="clearLogs()"><svg class="icon icon-sm" aria-hidden="true"><use href="#icon-trash"></use></svg><span>清除</span></button>
+                    <div class="log-actions">
+                        <button class="btn btn-sm btn-outline" id="copyLogsButton" onclick="copyLogs()"><svg class="icon icon-sm" aria-hidden="true"><use href="#icon-copy"></use></svg><span>复制</span></button>
+                        <button class="btn btn-sm btn-outline" onclick="clearLogs()"><svg class="icon icon-sm" aria-hidden="true"><use href="#icon-trash"></use></svg><span>清除</span></button>
+                    </div>
                 </div>
                 <div class="logs-container" id="logsContainer">
                     <div class="loading">加载中...</div>
@@ -313,30 +320,37 @@
                             </tbody>
                         </table>
                     </div>
-                    <aside id="resultDetailPanel" class="result-detail-panel">
+                </div>
+                <div id="resultDetailModal" class="modal result-detail-modal" role="dialog" aria-modal="true" aria-labelledby="detailTitle">
+                    <aside id="resultDetailPanel" class="modal-content result-detail-panel">
                         <div class="detail-panel-header">
                             <div>
                                 <div class="detail-kicker" id="detailSourceLabel">未选择结果</div>
                                 <h2 id="detailTitle">选择一条结果查看详情</h2>
                             </div>
-                            <a class="btn btn-sm btn-outline" id="detailSourceLink" href="#" target="_blank" rel="noopener noreferrer"><svg class="icon icon-sm" aria-hidden="true"><use href="#icon-link"></use></svg><span>原文</span></a>
+                            <div class="detail-panel-actions">
+                                <a class="btn btn-sm btn-outline" id="detailSourceLink" href="#" target="_blank" rel="noopener noreferrer"><svg class="icon icon-sm" aria-hidden="true"><use href="#icon-link"></use></svg><span>原文</span></a>
+                                <button class="modal-close" onclick="closeResultDetail()" aria-label="关闭详情"><svg class="icon" aria-hidden="true"><use href="#icon-x"></use></svg></button>
+                            </div>
                         </div>
-                        <div class="detail-empty" id="detailEmptyState">
-                            <svg class="icon icon-lg" aria-hidden="true"><use href="#icon-inbox"></use></svg>
-                            <span id="detailEmptyMessage">选择一条结果查看详情</span>
-                        </div>
-                        <div class="detail-grid" id="detailGrid">
-                            <div class="config-section"><label class="config-label">适合性</label><select class="config-input status-select" id="detailFitStatus"></select></div>
-                            <div class="config-section"><label class="config-label">跟进决策</label><select class="config-input status-select" id="detailFollowDecision"></select></div>
-                            <div class="config-section"><label class="config-label">紧急度</label><select class="config-input status-select" id="detailUrgency"></select></div>
-                            <div class="config-section"><label class="config-label">项目阶段</label><select class="config-input status-select" id="detailProjectStage"></select></div>
-                            <div class="config-section config-section-wide"><label class="config-label">不跟进原因</label><div id="detailNonFollowReasons" class="reason-list"></div></div>
-                            <div class="config-section config-section-wide"><label class="config-label">复核备注</label><textarea class="config-input" id="detailReviewNotes" rows="3"></textarea></div>
-                            <div class="config-section config-section-wide"><label class="config-label">字段对比</label><div id="detailFieldComparison" class="detail-field-comparison"><div class="detail-field-head"><span>字段</span><span>AI原始值</span><span>人工修正值</span><span>最终值</span></div><div id="detailManualFields"></div><div id="detailResolvedFields" class="is-hidden"></div></div></div>
-                            <div class="config-section"><label class="config-label">采购单位</label><input type="text" class="config-input" id="detailPurchaser" readonly></div>
-                            <div class="config-section config-section-wide"><label class="config-label">AI提取状态</label><div class="detail-meta-line" id="detailStatusLine">-</div></div>
-                            <div class="config-section config-section-wide"><label class="config-label">正文</label><div class="detail-text-block" id="detailTextBlock"></div></div>
-                            <div class="config-section config-section-wide"><label class="config-label">AI提取数据</label><pre class="detail-code-block" id="detailAiJson"></pre></div>
+                        <div class="detail-panel-body">
+                            <div class="detail-empty" id="detailEmptyState">
+                                <svg class="icon icon-lg" aria-hidden="true"><use href="#icon-inbox"></use></svg>
+                                <span id="detailEmptyMessage">选择一条结果查看详情</span>
+                            </div>
+                            <div class="detail-grid" id="detailGrid">
+                                <div class="config-section"><label class="config-label">适合性</label><select class="config-input status-select" id="detailFitStatus"></select></div>
+                                <div class="config-section"><label class="config-label">跟进决策</label><select class="config-input status-select" id="detailFollowDecision"></select></div>
+                                <div class="config-section"><label class="config-label">紧急度</label><select class="config-input status-select" id="detailUrgency"></select></div>
+                                <div class="config-section"><label class="config-label">项目阶段</label><select class="config-input status-select" id="detailProjectStage"></select></div>
+                                <div class="config-section config-section-wide"><label class="config-label">不跟进原因</label><div id="detailNonFollowReasons" class="reason-list"></div></div>
+                                <div class="config-section config-section-wide"><label class="config-label">复核备注</label><textarea class="config-input" id="detailReviewNotes" rows="3"></textarea></div>
+                                <div class="config-section config-section-wide"><label class="config-label">字段对比</label><div id="detailFieldComparison" class="detail-field-comparison"><div class="detail-field-head"><span>字段</span><span>AI原始值</span><span>人工修正值</span><span>最终值</span></div><div id="detailManualFields"></div><div id="detailResolvedFields" class="is-hidden"></div></div></div>
+                                <div class="config-section"><label class="config-label">采购单位</label><input type="text" class="config-input" id="detailPurchaser" readonly></div>
+                                <div class="config-section config-section-wide"><label class="config-label">AI提取状态</label><div class="detail-meta-line" id="detailStatusLine">-</div></div>
+                                <div class="config-section config-section-wide"><label class="config-label">正文</label><div class="detail-text-block" id="detailTextBlock"></div></div>
+                                <div class="config-section config-section-wide"><label class="config-label">AI提取数据</label><pre class="detail-code-block" id="detailAiJson"></pre></div>
+                            </div>
                         </div>
                         <div class="modal-footer detail-footer">
                             <button class="btn btn-outline modal-action" id="detailFieldsSaveButton" onclick="saveActiveResultFields()" disabled><svg class="icon icon-sm" aria-hidden="true"><use href="#icon-save"></use></svg><span>保存字段修正</span></button>
@@ -350,7 +364,19 @@
 
     <div id="page-sites" class="page">
         <div class="container content-grid sites-layout">
-            <div class="card">
+            <div class="card sites-search-card">
+                <div class="card-title"><span class="title-label"><svg class="icon" aria-hidden="true"><use href="#icon-search"></use></svg><span>搜索配置</span></span></div>
+                <div class="sites-search-grid">
+                    <div class="config-section config-section-wide"><label class="config-label">关注关键词（逗号分隔）</label><textarea class="config-input" id="cfgKeywords"></textarea></div>
+                    <div class="config-section"><label class="config-label">排除关键词</label><textarea class="config-input" id="cfgExclude"></textarea></div>
+                    <div class="config-section"><label class="config-label">必须包含</label><input type="text" class="config-input" id="cfgMustContain"></div>
+                    <div class="config-section"><label class="config-label">检索间隔（分钟）</label><input type="number" class="config-input" id="cfgInterval" min="5" max="120" value="20"></div>
+                </div>
+                <div class="toggle-switch"><span>浏览器模式</span><label class="switch"><input type="checkbox" id="cfgSelenium"><span class="slider"></span></label></div>
+                <p class="hint">浏览器模式会优先使用 CloakBrowser，必要时回落 Selenium，用于渲染 JS 列表和详情页</p>
+                <button class="btn btn-primary u-full u-full-mt-sm" onclick="saveConfig()"><svg class="icon icon-sm" aria-hidden="true"><use href="#icon-save"></use></svg><span>保存配置</span></button>
+            </div>
+            <div class="card sites-builtins-card">
                 <div class="card-title"><span class="title-label"><svg class="icon" aria-hidden="true"><use href="#icon-globe"></use></svg><span>内置网站</span></span></div>
                 <div class="btn-group u-full-mt-sm" data-admin-only>
                     <button class="btn btn-sm btn-outline" onclick="selectAllSites()"><svg class="icon icon-sm" aria-hidden="true"><use href="#icon-check"></use></svg><span>全选</span></button>
@@ -368,21 +394,11 @@
         <div class="container content-grid config-layout">
             <div class="config-column config-main-column">
                 <div class="card">
-                    <div class="card-title"><span class="title-label"><svg class="icon" aria-hidden="true"><use href="#icon-search"></use></svg><span>搜索配置</span></span></div>
-                    <div class="config-section"><label class="config-label">关注关键词（逗号分隔）</label><textarea class="config-input" id="cfgKeywords"></textarea></div>
-                    <div class="config-section"><label class="config-label">排除关键词</label><textarea class="config-input" id="cfgExclude"></textarea></div>
-                    <div class="config-section"><label class="config-label">必须包含</label><input type="text" class="config-input" id="cfgMustContain"></div>
-                    <div class="config-section"><label class="config-label">检索间隔（分钟）</label><input type="number" class="config-input" id="cfgInterval" min="5" max="120" value="20"></div>
-                    <div class="toggle-switch"><span>浏览器模式</span><label class="switch"><input type="checkbox" id="cfgSelenium"><span class="slider"></span></label></div>
-                    <p class="hint">浏览器模式会优先使用 CloakBrowser，必要时回落 Selenium，用于渲染 JS 列表和详情页</p>
-                    <button class="btn btn-primary u-full u-full-mt-sm" onclick="saveConfig()"><svg class="icon icon-sm" aria-hidden="true"><use href="#icon-save"></use></svg><span>保存配置</span></button>
-                </div>
-            </div>
-            <div class="config-column config-side-column">
-                <div class="card">
                     <div class="card-title"><span class="title-label"><svg class="icon" aria-hidden="true"><use href="#icon-bot"></use></svg><span>AI配置</span></span></div>
                     <div class="toggle-switch" onclick="showAiConfig()"><span class="title-label"><svg class="icon icon-sm" aria-hidden="true"><use href="#icon-bot"></use></svg><span>AI智能分析</span></span><span class="action-link">配置 <svg class="icon icon-sm" aria-hidden="true"><use href="#icon-chevron-right"></use></svg></span></div>
                 </div>
+            </div>
+            <div class="config-column config-side-column">
                 <div class="card">
                     <div class="card-title"><span class="title-label"><svg class="icon" aria-hidden="true"><use href="#icon-warning"></use></svg><span>危险操作</span></span></div>
                     <button class="btn btn-outline u-full" onclick="clearHistory()"><svg class="icon icon-sm" aria-hidden="true"><use href="#icon-trash"></use></svg><span>清空历史数据</span></button>

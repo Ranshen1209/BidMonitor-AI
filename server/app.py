@@ -304,15 +304,17 @@ class AppState:
         timestamp = datetime.now().strftime("%H:%M:%S")
         log_entry = f"[{timestamp}] {message}"
         self.logs.append(log_entry)
-        # 只保留最近200条日志
-        if len(self.logs) > 200:
-            self.logs = self.logs[-200:]
+        # 细粒度爬取日志较多，保留更长的最近窗口供前端排查。
+        if len(self.logs) > LOG_MEMORY_LIMIT:
+            self.logs = self.logs[-LOG_MEMORY_LIMIT:]
         logger.info(message)
 
 app_state = AppState()
 
 # 配置文件路径
 CONFIG_FILE = os.path.join(BASE_DIR, 'server', 'server_config.json')
+LOG_MEMORY_LIMIT = 20000
+LOG_API_LIMIT = 20000
 DEFAULT_URL_LIST_PATH = '/Users/cervine/Documents/Rule-Project/projects/opportunity-collection/output/materials/bid_related_url_list.txt'
 DEFAULT_URL_SOURCES_PATH = os.path.join(BASE_DIR, 'server', 'url_sources.json')
 DEFAULT_SITE_TOPOLOGIES_PATH = os.path.join(BASE_DIR, 'server', 'site_topologies.json')
@@ -323,6 +325,18 @@ auth_storage = AuthStorage(AUTH_DB_FILE)
 
 def is_legacy_url_list_key(key: Any) -> bool:
     return str(key).startswith('url_list_')
+
+def is_stale_builtin_path(path: Any, filename: str) -> bool:
+    """识别迁移后遗留的项目内置数据文件绝对路径。"""
+    if not path:
+        return False
+    normalized = os.path.normpath(str(path)).replace('\\', '/')
+    if os.path.exists(normalized):
+        return False
+    if os.path.basename(normalized) != filename:
+        return False
+    parts = set(normalized.split('/'))
+    return 'BidMonitor-AI' in parts or 'server' in parts
 
 def normalize_config(config: Dict[str, Any]) -> Dict[str, Any]:
     """补齐旧配置缺少的新字段，不覆盖用户已有值。"""
@@ -344,12 +358,18 @@ def normalize_config(config: Dict[str, Any]) -> Dict[str, Any]:
     if not ai_config.get('endpoint_type'):
         base_url = (ai_config.get('base_url') or '').rstrip('/').lower()
         ai_config['endpoint_type'] = 'chat_completions' if base_url.endswith('/chat/completions') else 'responses'
+    if is_stale_builtin_path(config.get('site_topologies_path'), 'site_topologies.json'):
+        config['site_topologies_path'] = DEFAULT_SITE_TOPOLOGIES_PATH
     for source in config.get('csv_url_sources', []):
-        if source.get('file_path') == DEFAULT_URL_LIST_PATH:
+        source_path = source.get('file_path')
+        if source_path == DEFAULT_URL_LIST_PATH or is_stale_builtin_path(source_path, 'url_sources.json'):
             source['name'] = '招标URL源'
             source['file_path'] = DEFAULT_URL_SOURCES_PATH
             source['source_type'] = 'json'
+        if is_stale_builtin_path(source.get('site_topologies_path'), 'site_topologies.json'):
+            source['site_topologies_path'] = DEFAULT_SITE_TOPOLOGIES_PATH
         source.setdefault('domain_delay', 2)
+        source.setdefault('concurrency', 4)
         source.setdefault('auth_cookies', [])
         if str(source.get('file_path', '')).endswith('.json'):
             source.setdefault('source_type', 'json')
@@ -412,6 +432,7 @@ def load_config() -> Dict[str, Any]:
                 'file_path': DEFAULT_URL_SOURCES_PATH,
                 'enabled': True,
                 'domain_delay': 2,
+                'concurrency': 4,
                 'auth_cookies': []
             }
         ]
@@ -675,9 +696,9 @@ async def run_monitor_task():
         )
         
         if config.get('use_selenium'):
-            app_state.add_log("✅ Selenium浏览器模式已启用")
+            app_state.add_log("浏览器渲染模式已启用")
         else:
-            app_state.add_log("📄 使用普通HTTP模式")
+            app_state.add_log("使用普通HTTP模式")
         
         # 设置爬虫总数
         app_state.progress_total = len(monitor.crawlers)
@@ -703,12 +724,13 @@ async def run_monitor_task():
             app_state.current_task_running = False
             return
         
-        new_count = result.get('new_count', 0)
-        app_state.add_log(f"检索完成，新增 {new_count} 条匹配招标信息")
+        new_count = result.get('saved_count', result.get('new_count', 0))
+        matched_count = result.get('matched_count', 0)
+        app_state.add_log(f"检索完成，新增入库 {new_count} 条，推荐通知 {matched_count} 条")
         
         # 发送通知（如果有新结果且未被中断）
-        if new_count > 0 and not app_state.stop_event.is_set():
-            await send_notifications(config, new_count)
+        if matched_count > 0 and not app_state.stop_event.is_set():
+            await send_notifications(config, matched_count)
         
     except Exception as e:
         app_state.add_log(f"检索任务异常: {e}")
@@ -1388,6 +1410,7 @@ async def update_non_follow_reasons(payload: Dict[str, Any], user: Dict[str, Any
 @app.get("/api/logs")
 async def get_logs(limit: int = 100, user: Dict[str, Any] = Depends(get_current_user)):
     """获取最近的日志"""
+    limit = max(1, min(int(limit), LOG_API_LIMIT))
     return {
         "logs": app_state.logs[-limit:]
     }

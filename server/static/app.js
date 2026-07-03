@@ -2,12 +2,14 @@ const API = '';
 const DEFAULT_AI_BASE_URL = 'https://api.sakrylle.com/v1';
 const DEFAULT_AI_MODEL = 'grok-4.20-fast';
 const SIDEBAR_COLLAPSED_KEY = 'bidmonitor.sidebarCollapsed';
+const LOG_FETCH_LIMIT = 2000;
 let currentConfig = {}, currentSites = [], currentUsers = [], currentUser = null;
 let currentResults = [], resultSettings = null, selectedResultIds = new Set(), activeResultId = null;
 let activeDetailManualOverrides = {};
 let editingUserId = null;
 let nextRunTime = null, countdownInterval = null;
 let statusTimer = null, logsTimer = null;
+let lastLogsSignature = '';
 const ACCESS_STATUS_OPTIONS = [
     { value: 'unknown', label: '未知' },
     { value: 'public_no_antibot', label: '公开可访问' },
@@ -98,7 +100,10 @@ async function showPage(name, tabElement) {
         await loadResults();
     }
     if (name === 'config') loadConfig();
-    if (name === 'sites') loadSites();
+    if (name === 'sites') {
+        await loadConfig();
+        await loadSites();
+    }
     if (name === 'users') loadUsers();
 }
 
@@ -244,12 +249,16 @@ function updateCountdown() {
 
 async function loadLogs() {
     try {
-        const res = await apiFetch('/api/logs?limit=50');
+        const res = await apiFetch(`/api/logs?limit=${LOG_FETCH_LIMIT}`);
         const data = await res.json();
         const c = document.getElementById('logsContainer');
+        const logs = data.logs || [];
+        const signature = `${logs.length}:${logs[0] || ''}:${logs[logs.length - 1] || ''}`;
+        if (signature === lastLogsSignature) return;
+        lastLogsSignature = signature;
         const isNearBottom = (c.scrollHeight - c.scrollTop - c.clientHeight) < 50;
-        if (data.logs && data.logs.length > 0) {
-            c.innerHTML = data.logs.map(log => {
+        if (logs.length > 0) {
+            c.innerHTML = logs.map(log => {
                 let cls = 'log-line';
                 if (/\u2705/.test(log) || log.includes('成功') || log.includes('[OK]')) cls += ' success';
                 else if (/\u274c/i.test(log) || log.includes('失败') || log.includes('[ERROR]') || log.includes('[FAILED]')) cls += ' error';
@@ -262,6 +271,45 @@ async function loadLogs() {
     } catch (e) {
         console.error(e);
         document.getElementById('logsContainer').innerHTML = '<div class="log-line error">无法加载日志</div>';
+    }
+}
+
+function getLogTextForCopy() {
+    const lines = Array.from(document.querySelectorAll('#logsContainer .log-line'))
+        .map(line => line.textContent.trim())
+        .filter(Boolean);
+    if (lines.length) return lines.join('\n');
+    const container = document.getElementById('logsContainer');
+    return container ? container.textContent.trim() : '';
+}
+
+async function writeClipboardText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+        return;
+    }
+    const buffer = document.createElement('textarea');
+    buffer.className = 'clipboard-buffer';
+    buffer.value = text;
+    buffer.setAttribute('readonly', '');
+    document.body.appendChild(buffer);
+    buffer.select();
+    const copied = document.execCommand('copy');
+    buffer.remove();
+    if (!copied) throw new Error('浏览器拒绝复制');
+}
+
+async function copyLogs() {
+    const text = getLogTextForCopy();
+    if (!text) {
+        alert('暂无可复制日志');
+        return;
+    }
+    try {
+        await writeClipboardText(text);
+        alert('日志已复制');
+    } catch (e) {
+        alert('复制失败: ' + e.message);
     }
 }
 
@@ -323,9 +371,9 @@ function renderResultsTable(data) {
         const selected = selectedResultIds.has(item.id);
         const activeClass = item.id === activeResultId ? ' is-active' : '';
         const href = safeResultUrl(item.url);
-        return `<tr class="result-row${activeClass}" data-result-id="${item.id}">
-            <td><input type="checkbox" class="result-checkbox" ${selected ? 'checked' : ''} onchange="toggleResultSelection(${item.id}, this.checked)"></td>
-            <td><button class="result-link" onclick="openResultDetail(${item.id})">${escapeHtml(item.title || '-')}</button></td>
+        return `<tr class="result-row${activeClass}" data-result-id="${item.id}" onclick="openResultDetail(${item.id})">
+            <td><input type="checkbox" class="result-checkbox" ${selected ? 'checked' : ''} onclick="event.stopPropagation()" onchange="toggleResultSelection(${item.id}, this.checked)"></td>
+            <td><button class="result-link" onclick="event.stopPropagation(); openResultDetail(${item.id})">${escapeHtml(item.title || '-')}</button></td>
             <td>${renderStatusLabel(item.fit_status, RESULT_LABELS.fit_status)}</td>
             <td>${renderStatusLabel(item.follow_decision, RESULT_LABELS.follow_decision)}</td>
             <td>${renderStatusLabel(item.urgency, RESULT_LABELS.urgency)}</td>
@@ -338,7 +386,7 @@ function renderResultsTable(data) {
             <td>${formatResultDate(item.submission_deadline)}</td>
             <td>${formatResultDate(item.bid_opening_time)}</td>
             <td>${renderAiStatus(item)}</td>
-            <td><a href="${href}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.source || '-')}</a></td>
+            <td><a href="${href}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">${escapeHtml(item.source || '-')}</a></td>
         </tr>`;
     }).join('');
     selectAll.checked = currentResults.length > 0 && currentResults.every(item => selectedResultIds.has(item.id));
@@ -396,6 +444,8 @@ async function loadResults() {
 
 function renderEmptyDetailPanel(message = '选择一条结果查看详情') {
     const panel = document.getElementById('resultDetailPanel');
+    const modal = document.getElementById('resultDetailModal');
+    if (modal) modal.classList.remove('active');
     panel.classList.remove('active');
     document.getElementById('detailSourceLabel').textContent = '未选择结果';
     document.getElementById('detailTitle').textContent = '选择一条结果查看详情';
@@ -406,6 +456,13 @@ function renderEmptyDetailPanel(message = '选择一条结果查看详情') {
     document.getElementById('detailFieldsSaveButton').disabled = true;
     document.getElementById('detailReviewSaveButton').disabled = true;
     activeDetailManualOverrides = {};
+}
+
+function closeResultDetail() {
+    const modal = document.getElementById('resultDetailModal');
+    if (modal) modal.classList.remove('active');
+    activeResultId = null;
+    document.querySelectorAll('.result-row').forEach(row => row.classList.remove('is-active'));
 }
 
 function detailResolvedValue(detail, key) {
@@ -483,6 +540,8 @@ async function openResultDetail(id) {
 
 function renderResultDetail(detail) {
     const panel = document.getElementById('resultDetailPanel');
+    const modal = document.getElementById('resultDetailModal');
+    if (modal) modal.classList.add('active');
     panel.classList.add('active');
     document.getElementById('detailSourceLabel').textContent = detail.source || '-';
     document.getElementById('detailTitle').textContent = detail.title || '-';
@@ -1007,6 +1066,7 @@ async function clearLogs() {
     if (!confirm('确定要清除所有日志吗？')) return;
     try {
         await apiFetch('/api/logs', { method: 'DELETE' });
+        lastLogsSignature = '';
         document.getElementById('logsContainer').innerHTML = '<div class="log-line">日志已清除</div>';
     } catch (e) { alert('清除失败: ' + e.message); }
 }

@@ -111,14 +111,22 @@ class SharedBrowserManager:
     """共享 Chrome 实例,所有站点复用。"""
     _driver = None
     _instance = None
+    _driver_unavailable = False
+    _failure_reason = ""
     _lock = threading.Lock()
 
     @classmethod
     def get_driver(cls, timeout: int = 30):
         with cls._lock:
+            if cls._driver_unavailable:
+                logging.warning(f"Selenium 浏览器后端本轮已熔断: {cls._failure_reason}")
+                return None
             if cls._driver is None:
                 cls._driver = _create_driver(headless=True, timeout=timeout)
                 cls._instance = True
+                if cls._driver is None:
+                    cls._driver_unavailable = True
+                    cls._failure_reason = "Chrome/ChromeDriver 初始化失败"
             return cls._driver
 
     @classmethod
@@ -128,8 +136,14 @@ class SharedBrowserManager:
                 cls._driver.quit()
             except Exception:
                 pass
-            cls._driver = None
-            cls._instance = None
+        cls._driver = None
+        cls._instance = None
+        cls._driver_unavailable = False
+        cls._failure_reason = ""
+
+    @classmethod
+    def is_unavailable(cls) -> bool:
+        return cls._driver_unavailable
 
 
 class SeleniumCrawler(BrowserCrawler):
@@ -145,7 +159,7 @@ class SeleniumCrawler(BrowserCrawler):
             return None
         if not self.driver:
             self.driver = SharedBrowserManager.get_driver(self.timeout)
-            if not self.driver:
+            if not self.driver and not SharedBrowserManager.is_unavailable():
                 self.driver = _create_driver(self.headless, self.timeout)
             if not self.driver:
                 return None

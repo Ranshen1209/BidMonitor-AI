@@ -276,7 +276,11 @@ class MonitorCore:
 
         # 2. 加载默认内置网站
         if use_selenium:
-            self.log("[DEBUG] 浏览器模式已启用(CloakBrowser→Selenium→requests 降级)")
+            browser_backend = crawler_config.get('browser_backend', {}) or {}
+            if browser_backend.get('cloakbrowser_enabled') is False:
+                self.log("[DEBUG] 浏览器模式已启用(Selenium→requests 降级，CloakBrowser 已禁用)")
+            else:
+                self.log("[DEBUG] 浏览器模式已启用(CloakBrowser→Selenium→requests 降级)")
 
         from crawler.custom import CustomCrawler
         if crawler_config.get('enable_legacy_site_crawlers', False):
@@ -385,7 +389,8 @@ class MonitorCore:
         self.log("=" * 40)
         self.log(f"Start crawling at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         
-        all_matched_bids = []
+        all_saved_bids = []
+        notification_bids = []
         failed_sites = []
         total_crawlers = len(self.crawlers)
         
@@ -424,7 +429,8 @@ class MonitorCore:
                     self.log(f"[FAILED] {crawler.name}: Website may be blocking requests!")
                     continue
                 
-                # 匹配关键字
+                # 抓到的数据先入库；关键词和 AI 只作为结果中心判断/通知依据。
+                saved_count = 0
                 matched_count = 0
                 for bid in bids:
                     # 在匹配过程中也检查停止信号
@@ -433,68 +439,78 @@ class MonitorCore:
                         break
                     
                     result = self.matcher.match_any(bid.title, bid.content)
-                    
+
                     if result.matched:
+                        matched_count += 1
                         # 记录关键词匹配的项目
                         ai_stats['keyword_matched'].append({
                             'title': bid.title,
                             'url': bid.url
                         })
-                        
-                        # AI 二次过滤 (如果启用)
-                        if self.ai_guard:
-                            ai_relevant, ai_reason = self.ai_guard.check_relevance(bid.title, bid.content or "")
-                            if not ai_relevant:
-                                ai_stats['ai_rejected'].append({
-                                    'title': bid.title,
-                                    'url': bid.url,
-                                    'reason': ai_reason
-                                })
-                                self.log(f"[AI过滤] 跳过: {bid.title[:30]}... (原因: {ai_reason})")
-                                continue
-                            else:
-                                ai_stats['ai_approved'].append({
-                                    'title': bid.title,
-                                    'url': bid.url,
-                                    'reason': ai_reason
-                                })
-                        
-                        if not self.storage.exists(bid):
-                            result_id = self.storage.save(bid, notified=False)
-                            if result_id:
-                                if bid.crawl_run_id:
-                                    self.storage.increment_crawl_run_counts(
-                                        bid.crawl_run_id,
-                                        inserted_delta=1,
-                                    )
-                                all_matched_bids.append(bid)
-                                matched_count += 1
-                                enrich_new_bid(
-                                    self.storage,
-                                    result_id,
-                                    bid,
-                                    self.ai_config_for_extraction,
-                                    log_callback=self.log,
-                                    fetch_config=self.config.get('crawler', {}),
+
+                    result_id = None
+                    if not self.storage.exists(bid):
+                        result_id = self.storage.save(bid, notified=False)
+                        if result_id:
+                            if bid.crawl_run_id:
+                                self.storage.increment_crawl_run_counts(
+                                    bid.crawl_run_id,
+                                    inserted_delta=1,
                                 )
-                        elif bid.crawl_run_id:
-                            self.storage.increment_crawl_run_counts(
-                                bid.crawl_run_id,
-                                skipped_delta=1,
+                            all_saved_bids.append(bid)
+                            saved_count += 1
+                            enrich_new_bid(
+                                self.storage,
+                                result_id,
+                                bid,
+                                self.ai_config_for_extraction,
+                                log_callback=self.log,
+                                fetch_config=self.config.get('crawler', {}),
                             )
-                
-                self.log(f"[OK] {crawler.name}: Found {len(bids)} items, {matched_count} new matches")
+                    elif bid.crawl_run_id:
+                        self.storage.increment_crawl_run_counts(
+                            bid.crawl_run_id,
+                            skipped_delta=1,
+                        )
+
+                    ai_relevant = True
+                    ai_reason = ""
+                    if self.ai_guard:
+                        ai_relevant, ai_reason = self.ai_guard.check_relevance(bid.title, bid.content or "")
+                        ai_bucket = ai_stats['ai_approved'] if ai_relevant else ai_stats['ai_rejected']
+                        ai_bucket.append({
+                            'title': bid.title,
+                            'url': bid.url,
+                            'reason': ai_reason
+                        })
+                        if result_id:
+                            review_update = {
+                                "fit_status": "fit" if ai_relevant else "not_fit",
+                                "review_notes": f"AI初判: {ai_reason}",
+                            }
+                            self.storage.update_review([result_id], review_update)
+
+                    should_notify = result.matched and ai_relevant
+                    if result_id and not should_notify:
+                        self.storage.mark_notified(bid)
+                    if result_id and should_notify:
+                        notification_bids.append(bid)
+
+                self.log(
+                    f"[OK] {crawler.name}: Found {len(bids)} items, "
+                    f"{saved_count} new saved, {matched_count} keyword matches"
+                )
                 
             except Exception as e:
                 failed_sites.append({'name': crawler.name, 'error': str(e)})
                 self.log(f"[ERROR] {crawler.name}: {e}")
         
         # 发送通知
-        if all_matched_bids:
-            self.log(f"Sending notifications for {len(all_matched_bids)} new items...")
-            self._send_notifications(all_matched_bids)
+        if notification_bids:
+            self.log(f"Sending notifications for {len(notification_bids)} matched items...")
+            self._send_notifications(notification_bids)
         else:
-            self.log("No new matching items found")
+            self.log("No matching items need notification")
         
         # 报告失败的网站
         if failed_sites:
@@ -543,7 +559,9 @@ class MonitorCore:
             pass
         
         return {
-            'new_count': len(all_matched_bids),
+            'new_count': len(all_saved_bids),
+            'saved_count': len(all_saved_bids),
+            'matched_count': len(notification_bids),
             'failed_sites': failed_sites,
             'total_crawlers': len(self.crawlers),
             'ai_stats': ai_stats

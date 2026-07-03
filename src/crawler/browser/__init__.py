@@ -29,8 +29,15 @@ def _load_backends() -> Tuple[Optional[Type[BrowserCrawler]], Optional[Type[Brow
 def create_browser_crawler(config: dict, name: str, url: str,
                            headless: bool = True) -> Optional[BrowserCrawler]:
     """按 CloakBrowser → Selenium 顺序返回可用后端实例;都不可用返回 None。"""
+    browser_backend = (config or {}).get("browser_backend") or {}
+    mode = browser_backend.get("mode")
+    cloak_enabled = browser_backend.get("cloakbrowser_enabled", True) is not False
     cloak_cls, selenium_cls = _load_backends()
-    if cloak_cls is not None:
+    if mode == "browser_selenium":
+        cloak_enabled = False
+    if mode == "browser_cloak":
+        selenium_cls = None
+    if cloak_cls is not None and cloak_enabled:
         logger.info(f"[browser] 使用 CloakBrowser 后端: {name}")
         return cloak_cls(config, name, url, headless=headless)
     if selenium_cls is not None:

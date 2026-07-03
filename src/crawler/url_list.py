@@ -5,7 +5,9 @@ import csv
 import json
 import os
 import re
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from html.parser import HTMLParser
 from types import SimpleNamespace
@@ -38,6 +40,9 @@ from .source_registry import load_url_sources
 
 DEFAULT_SITE_TOPOLOGIES_PATH = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "server", "site_topologies.json")
+)
+DEFAULT_URL_SOURCES_PATH = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "server", "url_sources.json")
 )
 
 
@@ -324,7 +329,11 @@ class UrlListCrawler(BaseCrawler):
         config.setdefault("request_delay", source_config.get("request_delay", 0))
         self.source_config = source_config
         self._name = source_config.get("name") or "URL列表"
-        self.file_path = source_config.get("file_path", "")
+        self.file_path = self._resolve_builtin_data_path(
+            source_config.get("file_path", ""),
+            DEFAULT_URL_SOURCES_PATH,
+            "url_sources.json",
+        )
         self.diagnostics_path = (
             source_config.get("diagnostics_path")
             or config.get("diagnostics_path")
@@ -334,20 +343,28 @@ class UrlListCrawler(BaseCrawler):
         self.max_links_per_page = int(config.get("url_list_max_links_per_page", 50))
         self.topology_max_depth = int(source_config.get("topology_max_depth", config.get("topology_max_depth", 3)))
         self.max_follow_links_per_page = int(
-            source_config.get("max_follow_links_per_page", config.get("max_follow_links_per_page", 80))
+            source_config.get("max_follow_links_per_page", config.get("max_follow_links_per_page", 25))
         )
         self.max_detail_pages_per_seed = int(
-            source_config.get("max_detail_pages_per_seed", config.get("max_detail_pages_per_seed", 50))
+            source_config.get("max_detail_pages_per_seed", config.get("max_detail_pages_per_seed", 15))
         )
+        self.url_concurrency = max(1, int(source_config.get("concurrency", config.get("url_list_concurrency", 1))))
         self.domain_delay = float(source_config.get("domain_delay", config.get("domain_delay", 0)))
         self.auth_cookies = source_config.get("auth_cookies", config.get("auth_cookies", []))
         self.preserve_missing_publish_date = bool(config.get("preserve_missing_publish_date"))
         self._last_domain_request_at: Dict[str, float] = {}
-        self.site_topologies = self._load_site_topologies(
+        self._domain_locks: Dict[str, threading.Lock] = {}
+        self._domain_locks_guard = threading.Lock()
+        self._diagnostics_lock = threading.Lock()
+        self._browser_fetch_lock = threading.Lock()
+        topology_path = self._resolve_builtin_data_path(
             source_config.get("site_topologies_path")
             or config.get("site_topologies_path")
-            or DEFAULT_SITE_TOPOLOGIES_PATH
+            or DEFAULT_SITE_TOPOLOGIES_PATH,
+            DEFAULT_SITE_TOPOLOGIES_PATH,
+            "site_topologies.json",
         )
+        self.site_topologies = self._load_site_topologies(topology_path)
         super().__init__(config)
 
     @property
@@ -356,7 +373,7 @@ class UrlListCrawler(BaseCrawler):
 
     def get_list_urls(self) -> List[str]:
         if not self.file_path or not os.path.exists(self.file_path):
-            self.logger.warning(f"[{self.name}] URL list file not found: {self.file_path}")
+            self._emit_log(f"[WARN] [{self.name}] URL清单文件不存在: {self.file_path}")
             return []
 
         ext = os.path.splitext(self.file_path)[1].lower()
@@ -379,6 +396,33 @@ class UrlListCrawler(BaseCrawler):
             urls.append(url)
         return urls
 
+    def _resolve_builtin_data_path(self, path: str, fallback_path: str, filename: str) -> str:
+        if not path:
+            return path
+        normalized = os.path.normpath(str(path))
+        if os.path.exists(normalized):
+            return normalized
+        if os.path.basename(normalized) != filename:
+            return path
+        parts = set(normalized.replace("\\", "/").split("/"))
+        if "BidMonitor-AI" in parts or "server" in parts:
+            return fallback_path
+        return path
+
+    def _emit_log(self, message: str) -> None:
+        self.logger.warning(message)
+        if self.log_callback:
+            self.log_callback(message)
+
+    def _emit_info(self, message: str) -> None:
+        self.logger.info(message)
+        if self.log_callback:
+            self.log_callback(message)
+
+    def _short_url(self, url: str, limit: int = 140) -> str:
+        url = str(url or "")
+        return url if len(url) <= limit else f"{url[:limit - 3]}..."
+
     def parse(self, html: str) -> List[BidInfo]:
         return self._parse_page(html, self.base_url, datetime.now().isoformat(timespec="seconds"))
 
@@ -389,205 +433,243 @@ class UrlListCrawler(BaseCrawler):
         urls = self.get_list_urls()
         all_bids: List[BidInfo] = []
         self.logger.info(f"[{self.name}] Starting URL list crawl, {len(urls)} URL(s)")
+        self._emit_info(f"[URL进度] {self.name}: 准备抓取 {len(urls)} 个入口URL")
 
-        for url in urls:
-            if stop_event and stop_event.is_set():
-                self.logger.info(f"[{self.name}] Crawl interrupted by stop signal")
-                break
+        if not urls:
+            self.logger.info(f"[{self.name}] URL list crawl done, got 0 item(s)")
+            return []
 
-            timestamp = datetime.now().isoformat(timespec="seconds")
-            cookie_used = self._get_cookie_for_url(url) is not None
-            try:
-                rule = self._classify_url(url)
-                if self._should_skip_before_fetch(rule):
-                    self._record_diagnostic(
-                        url,
-                        "skipped_with_reason",
-                        rule["reason"],
-                        timestamp,
-                        cookie_used=cookie_used,
-                        rule=rule,
-                    )
-                    continue
-
-                self._respect_rate_limit(url)
-                browser_first = self._prefers_browser_fetch(url)
-                browser_result = self._request_url_with_browser(url) if browser_first else None
-                if browser_result:
-                    html, status_code, status_text = browser_result
-                else:
+        concurrency = min(self.url_concurrency, len(urls))
+        if concurrency <= 1:
+            for index, url in enumerate(urls, 1):
+                all_bids.extend(self._crawl_one_entry(index, len(urls), url, stop_event=stop_event))
+        else:
+            self._emit_info(f"[URL并发] {self.name}: 启用 {concurrency} 个入口并发，同域仍按 {self.domain_delay:g}s 限频")
+            with ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix="url-crawl") as executor:
+                future_to_url = {
+                    executor.submit(self._crawl_one_entry, index, len(urls), url, stop_event): url
+                    for index, url in enumerate(urls, 1)
+                }
+                for future in as_completed(future_to_url):
+                    if stop_event and stop_event.is_set():
+                        break
                     try:
-                        html, status_code, status_text = self._request_url(url)
-                    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.RequestException):
-                        if not self._browser_mode_enabled():
-                            raise
-                        browser_result = self._request_url_with_browser(url)
-                        if not browser_result:
-                            raise
-                        html, status_code, status_text = browser_result
-                if status_code in (401, 403):
-                    seed_bids = self._try_topology_seed_fallback(url, timestamp, rule, cookie_used)
-                    if seed_bids:
-                        all_bids.extend(seed_bids)
-                        self._record_diagnostic(
-                            url,
-                            "success",
-                            f"入口 HTTP {status_code}，已按站点拓扑种子继续并生成 {len(seed_bids)} 条 BidInfo",
-                            timestamp,
-                            status_code,
-                            item_count=len(seed_bids),
-                            cookie_used=cookie_used,
-                            rule=rule,
-                        )
-                        continue
-                    self._record_diagnostic(
-                        url,
-                        "failed",
-                        "HTTP 403/401: 疑似反爬或需要登录；如有授权 Cookie，请在配置中更新后重试",
-                        timestamp,
-                        status_code,
-                        cookie_used=cookie_used,
-                        rule=rule,
-                    )
-                    continue
-                if status_code == 404 or status_code >= 500:
-                    seed_bids = self._try_topology_seed_fallback(url, timestamp, rule, cookie_used)
-                    if seed_bids:
-                        all_bids.extend(seed_bids)
-                        self._record_diagnostic(
-                            url,
-                            "success",
-                            f"入口 HTTP {status_code}，已按站点拓扑种子继续并生成 {len(seed_bids)} 条 BidInfo",
-                            timestamp,
-                            status_code,
-                            item_count=len(seed_bids),
-                            cookie_used=cookie_used,
-                            rule=rule,
-                        )
-                        continue
-                    self._record_diagnostic(
-                        url,
-                        "failed",
-                        "HTTP 404/5xx: 页面不存在或源站异常",
-                        timestamp,
-                        status_code,
-                        cookie_used=cookie_used,
-                        rule=rule,
-                    )
-                    continue
-                if self._contains_blocked_sign(html, url):
-                    blocked_reason = self._blocked_reason(html, url)
-                    seed_bids = self._try_topology_seed_fallback(url, timestamp, rule, cookie_used)
-                    if seed_bids:
-                        all_bids.extend(seed_bids)
-                        self._record_diagnostic(
-                            url,
-                            "success",
-                            f"入口受限（{blocked_reason}），已按站点拓扑种子继续并生成 {len(seed_bids)} 条 BidInfo",
-                            timestamp,
-                            status_code,
-                            item_count=len(seed_bids),
-                            cookie_used=cookie_used,
-                            rule=rule,
-                        )
-                        continue
-                    self._record_diagnostic(
-                        url,
-                        "failed",
-                        blocked_reason,
-                        timestamp,
-                        status_code,
-                        cookie_used=cookie_used,
-                        rule=rule,
-                    )
-                    continue
-
-                bids = self._crawl_topology_from_url(url, html, timestamp, rule, cookie_used)
-                if not bids:
-                    self._record_diagnostic(
-                        url,
-                        "failed",
-                        "页面可访问但无可识别公告链接/正文: 解析规则不足",
-                        timestamp,
-                        status_code,
-                        cookie_used=cookie_used,
-                        rule=rule,
-                    )
-                    continue
-
-                all_bids.extend(bids)
-                self._record_diagnostic(
-                    url,
-                    "success",
-                    f"OK: 生成 {len(bids)} 条 BidInfo",
-                    timestamp,
-                    status_code,
-                    item_count=len(bids),
-                    cookie_used=cookie_used,
-                    rule=rule,
-                )
-                self.logger.info(f"[{self.name}] OK {url} -> {len(bids)} item(s)")
-            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as exc:
-                rule = locals().get("rule") or self._classify_url(url)
-                seed_bids = self._try_topology_seed_fallback(url, timestamp, rule, cookie_used)
-                if seed_bids:
-                    all_bids.extend(seed_bids)
-                    self._record_diagnostic(
-                        url,
-                        "success",
-                        f"入口请求异常（{exc.__class__.__name__}），已按站点拓扑种子继续并生成 {len(seed_bids)} 条 BidInfo",
-                        timestamp,
-                        item_count=len(seed_bids),
-                        cookie_used=cookie_used,
-                        rule=rule,
-                    )
-                    continue
-                self._record_diagnostic(
-                    url,
-                    "failed",
-                    f"timeout/connection error: 网络不可达或站点不稳定 ({exc.__class__.__name__})",
-                    timestamp,
-                    cookie_used=cookie_used,
-                    rule=locals().get("rule"),
-                )
-                self.logger.warning(f"[{self.name}] Network failed {url}: {exc}")
-            except requests.RequestException as exc:
-                rule = locals().get("rule") or self._classify_url(url)
-                seed_bids = self._try_topology_seed_fallback(url, timestamp, rule, cookie_used)
-                if seed_bids:
-                    all_bids.extend(seed_bids)
-                    self._record_diagnostic(
-                        url,
-                        "success",
-                        f"入口请求异常（{exc.__class__.__name__}），已按站点拓扑种子继续并生成 {len(seed_bids)} 条 BidInfo",
-                        timestamp,
-                        item_count=len(seed_bids),
-                        cookie_used=cookie_used,
-                        rule=rule,
-                    )
-                    continue
-                self._record_diagnostic(
-                    url,
-                    "failed",
-                    f"timeout/connection error: 网络不可达或站点不稳定 ({exc.__class__.__name__})",
-                    timestamp,
-                    cookie_used=cookie_used,
-                    rule=locals().get("rule"),
-                )
-                self.logger.warning(f"[{self.name}] Request failed {url}: {exc}")
-            except Exception as exc:
-                self._record_diagnostic(
-                    url,
-                    "failed",
-                    f"页面可访问但无可识别公告链接/正文: 解析规则不足 ({exc})",
-                    timestamp,
-                    cookie_used=cookie_used,
-                    rule=locals().get("rule"),
-                )
-                self.logger.warning(f"[{self.name}] Parse failed {url}: {exc}")
+                        all_bids.extend(future.result())
+                    except Exception as exc:
+                        url = future_to_url[future]
+                        self._emit_log(f"[URL诊断] {self.name} | failed | {url} | 并发任务异常: {exc}")
 
         self.logger.info(f"[{self.name}] URL list crawl done, got {len(all_bids)} item(s)")
         return all_bids
+
+    def _crawl_one_entry(self, index: int, total: int, url: str, stop_event=None) -> List[BidInfo]:
+        entry_bids: List[BidInfo] = []
+        if stop_event and stop_event.is_set():
+            self.logger.info(f"[{self.name}] Crawl interrupted by stop signal")
+            return entry_bids
+
+        entry_started_at = time.monotonic()
+        timestamp = datetime.now().isoformat(timespec="seconds")
+        cookie_used = self._get_cookie_for_url(url) is not None
+        try:
+            self._emit_info(f"[URL进度] {self.name}: {index}/{total} {self._short_url(url)}")
+            rule = self._classify_url(url)
+            self._emit_info(
+                f"[URL分类] {self.name}: {rule.get('platform')} | {rule.get('page_type')} | "
+                f"{rule.get('handling')} | {self._short_url(url)}"
+            )
+            if self._should_skip_before_fetch(rule):
+                self._record_diagnostic(
+                    url,
+                    "skipped_with_reason",
+                    rule["reason"],
+                    timestamp,
+                    cookie_used=cookie_used,
+                    rule=rule,
+                )
+                return entry_bids
+
+            self._respect_rate_limit(url)
+            browser_first = self._prefers_browser_fetch(url)
+            browser_result = self._request_url_with_browser(url) if browser_first else None
+            if browser_result:
+                html, status_code, status_text = browser_result
+            else:
+                try:
+                    html, status_code, status_text = self._request_url(url)
+                except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.RequestException):
+                    if not self._should_retry_browser_for_fetch_failure(url):
+                        raise
+                    browser_result = self._request_url_with_browser(url)
+                    if not browser_result:
+                        raise
+                    html, status_code, status_text = browser_result
+            if status_code in (401, 403):
+                seed_bids = self._try_topology_seed_fallback(url, timestamp, rule, cookie_used, stop_event=stop_event)
+                if seed_bids:
+                    entry_bids.extend(seed_bids)
+                    self._record_diagnostic(
+                        url,
+                        "success",
+                        f"入口 HTTP {status_code}，已按站点拓扑种子继续并生成 {len(seed_bids)} 条 BidInfo",
+                        timestamp,
+                        status_code,
+                        item_count=len(seed_bids),
+                        cookie_used=cookie_used,
+                        rule=rule,
+                    )
+                    return entry_bids
+                self._record_diagnostic(
+                    url,
+                    "failed",
+                    "HTTP 403/401: 疑似反爬或需要登录；如有授权 Cookie，请在配置中更新后重试",
+                    timestamp,
+                    status_code,
+                    cookie_used=cookie_used,
+                    rule=rule,
+                )
+                return entry_bids
+            if status_code == 404 or status_code >= 500:
+                seed_bids = self._try_topology_seed_fallback(url, timestamp, rule, cookie_used, stop_event=stop_event)
+                if seed_bids:
+                    entry_bids.extend(seed_bids)
+                    self._record_diagnostic(
+                        url,
+                        "success",
+                        f"入口 HTTP {status_code}，已按站点拓扑种子继续并生成 {len(seed_bids)} 条 BidInfo",
+                        timestamp,
+                        status_code,
+                        item_count=len(seed_bids),
+                        cookie_used=cookie_used,
+                        rule=rule,
+                    )
+                    return entry_bids
+                self._record_diagnostic(
+                    url,
+                    "failed",
+                    "HTTP 404/5xx: 页面不存在或源站异常",
+                    timestamp,
+                    status_code,
+                    cookie_used=cookie_used,
+                    rule=rule,
+                )
+                return entry_bids
+            if self._contains_blocked_sign(html, url):
+                blocked_reason = self._blocked_reason(html, url)
+                seed_bids = self._try_topology_seed_fallback(url, timestamp, rule, cookie_used, stop_event=stop_event)
+                if seed_bids:
+                    entry_bids.extend(seed_bids)
+                    self._record_diagnostic(
+                        url,
+                        "success",
+                        f"入口受限（{blocked_reason}），已按站点拓扑种子继续并生成 {len(seed_bids)} 条 BidInfo",
+                        timestamp,
+                        status_code,
+                        item_count=len(seed_bids),
+                        cookie_used=cookie_used,
+                        rule=rule,
+                    )
+                    return entry_bids
+                self._record_diagnostic(
+                    url,
+                    "failed",
+                    blocked_reason,
+                    timestamp,
+                    status_code,
+                    cookie_used=cookie_used,
+                    rule=rule,
+                )
+                return entry_bids
+
+            bids = self._crawl_topology_from_url(url, html, timestamp, rule, cookie_used, stop_event=stop_event)
+            if not bids:
+                self._record_diagnostic(
+                    url,
+                    "failed",
+                    "页面可访问但无可识别公告链接/正文: 解析规则不足",
+                    timestamp,
+                    status_code,
+                    cookie_used=cookie_used,
+                    rule=rule,
+                )
+                return entry_bids
+
+            entry_bids.extend(bids)
+            self._record_diagnostic(
+                url,
+                "success",
+                f"OK: 生成 {len(bids)} 条 BidInfo",
+                timestamp,
+                status_code,
+                item_count=len(bids),
+                cookie_used=cookie_used,
+                rule=rule,
+            )
+            self.logger.info(f"[{self.name}] OK {url} -> {len(bids)} item(s)")
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as exc:
+            rule = locals().get("rule") or self._classify_url(url)
+            seed_bids = self._try_topology_seed_fallback(url, timestamp, rule, cookie_used, stop_event=stop_event)
+            if seed_bids:
+                entry_bids.extend(seed_bids)
+                self._record_diagnostic(
+                    url,
+                    "success",
+                    f"入口请求异常（{exc.__class__.__name__}），已按站点拓扑种子继续并生成 {len(seed_bids)} 条 BidInfo",
+                    timestamp,
+                    item_count=len(seed_bids),
+                    cookie_used=cookie_used,
+                    rule=rule,
+                )
+                return entry_bids
+            self._record_diagnostic(
+                url,
+                "failed",
+                f"timeout/connection error: 网络不可达或站点不稳定 ({exc.__class__.__name__})",
+                timestamp,
+                cookie_used=cookie_used,
+                rule=locals().get("rule"),
+            )
+            self.logger.warning(f"[{self.name}] Network failed {url}: {exc}")
+        except requests.RequestException as exc:
+            rule = locals().get("rule") or self._classify_url(url)
+            seed_bids = self._try_topology_seed_fallback(url, timestamp, rule, cookie_used, stop_event=stop_event)
+            if seed_bids:
+                entry_bids.extend(seed_bids)
+                self._record_diagnostic(
+                    url,
+                    "success",
+                    f"入口请求异常（{exc.__class__.__name__}），已按站点拓扑种子继续并生成 {len(seed_bids)} 条 BidInfo",
+                    timestamp,
+                    item_count=len(seed_bids),
+                    cookie_used=cookie_used,
+                    rule=rule,
+                )
+                return entry_bids
+            self._record_diagnostic(
+                url,
+                "failed",
+                f"timeout/connection error: 网络不可达或站点不稳定 ({exc.__class__.__name__})",
+                timestamp,
+                cookie_used=cookie_used,
+                rule=locals().get("rule"),
+            )
+            self.logger.warning(f"[{self.name}] Request failed {url}: {exc}")
+        except Exception as exc:
+            self._record_diagnostic(
+                url,
+                "failed",
+                f"页面可访问但无可识别公告链接/正文: 解析规则不足 ({exc})",
+                timestamp,
+                cookie_used=cookie_used,
+                rule=locals().get("rule"),
+            )
+            self.logger.warning(f"[{self.name}] Parse failed {url}: {exc}")
+        finally:
+            elapsed = time.monotonic() - entry_started_at
+            self._emit_info(
+                f"[URL进度] {self.name}: 完成 {index}/{total}，耗时 {elapsed:.1f}s，本入口 {len(entry_bids)} 条"
+            )
+        return entry_bids
 
     def _try_topology_seed_fallback(
         self,
@@ -595,10 +677,11 @@ class UrlListCrawler(BaseCrawler):
         timestamp: str,
         rule: Dict[str, str],
         cookie_used: bool,
+        stop_event=None,
     ) -> List[BidInfo]:
         if not self._topology_seed_links(url):
             return []
-        return self._crawl_topology_from_url(url, "", timestamp, rule, cookie_used)
+        return self._crawl_topology_from_url(url, "", timestamp, rule, cookie_used, stop_event=stop_event)
 
     def _crawl_topology_from_url(
         self,
@@ -607,17 +690,30 @@ class UrlListCrawler(BaseCrawler):
         timestamp: str,
         seed_rule: Dict[str, str],
         cookie_used: bool = False,
+        stop_event=None,
     ) -> List[BidInfo]:
         bids: List[BidInfo] = []
         queue: List[Tuple[str, int, Optional[str], str]] = [(seed_url, 0, seed_html, "")]
         visited: set[str] = set()
+        self._emit_info(
+            f"[URL拓扑] {self.name}: 开始 {self._short_url(seed_url)}，"
+            f"最大详情 {self.max_detail_pages_per_seed}，每页候选 {self.max_follow_links_per_page}"
+        )
 
         while queue and len(bids) < self.max_detail_pages_per_seed:
+            if stop_event and stop_event.is_set():
+                self.logger.info(f"[{self.name}] Topology crawl interrupted by stop signal")
+                break
             page_url, depth, prefetched_html, expected_title = queue.pop(0)
             normalized_url = page_url.split("#", 1)[0]
             if normalized_url in visited:
                 continue
             visited.add(normalized_url)
+            self._emit_info(
+                f"[URL拓扑] {self.name}: depth={depth} visited={len(visited)} "
+                f"queue={len(queue)} bids={len(bids)}/{self.max_detail_pages_per_seed} "
+                f"{self._short_url(page_url)}"
+            )
 
             if prefetched_html is None:
                 browser_first = self._prefers_browser_fetch(page_url)
@@ -630,7 +726,7 @@ class UrlListCrawler(BaseCrawler):
                         html, status_code, _status_text = self._request_url(page_url)
                     except Exception as exc:
                         reason = f"{exc.__class__.__name__}: {exc}"
-                        if self._browser_mode_enabled():
+                        if self._should_retry_browser_for_fetch_failure(page_url):
                             browser_result = self._request_url_with_browser(page_url)
                             if browser_result:
                                 html, status_code, _status_text = browser_result
@@ -644,7 +740,7 @@ class UrlListCrawler(BaseCrawler):
                             continue
                 if status_code >= 400 or self._contains_blocked_sign(html, page_url):
                     failure_reason = self._topology_fetch_failure_reason(page_url, html, status_code, _status_text)
-                    if self._browser_mode_enabled():
+                    if self._should_retry_browser_for_fetch_failure(page_url):
                         browser_result = self._request_url_with_browser(page_url)
                         if browser_result:
                             html, status_code, _status_text = browser_result
@@ -676,7 +772,8 @@ class UrlListCrawler(BaseCrawler):
                 html = prefetched_html
 
             parsed_bids = self._parse_page(html, page_url, timestamp)
-            if self._browser_mode_enabled() and not self._has_topology_progress(parsed_bids, page_url):
+            if self._should_retry_browser_after_no_progress(page_url, prefetched_html) and not self._has_topology_progress(parsed_bids, page_url):
+                self._emit_info(f"[URL浏览器] {self.name}: HTTP无进展，尝试浏览器 {self._short_url(page_url)}")
                 browser_result = self._request_url_with_browser(page_url)
                 if browser_result:
                     browser_html, browser_status, _browser_text = browser_result
@@ -695,6 +792,11 @@ class UrlListCrawler(BaseCrawler):
                 if bid.url != page_url:
                     candidate_links.append({"title": bid.title, "url": bid.url})
 
+            self._emit_info(
+                f"[URL解析] {self.name}: 当前页详情 {len(detail_bids)} 条，候选 {len(candidate_links)} 条，"
+                f"{self._short_url(page_url)}"
+            )
+
             for detail_bid in detail_bids:
                 if len(bids) >= self.max_detail_pages_per_seed:
                     break
@@ -709,6 +811,7 @@ class UrlListCrawler(BaseCrawler):
             )
             if depth == 0:
                 candidate_links = self._merge_candidate_links(self._topology_seed_links(seed_url), candidate_links)
+            enqueued = 0
             for link in candidate_links[: self.max_follow_links_per_page]:
                 candidate_url = link.get("url", "")
                 if not candidate_url or candidate_url.split("#", 1)[0] in visited:
@@ -716,6 +819,12 @@ class UrlListCrawler(BaseCrawler):
                 if not self._should_follow_candidate(page_url, candidate_url, depth):
                     continue
                 queue.append((candidate_url, depth + 1, None, link.get("title", "")))
+                enqueued += 1
+            if candidate_links:
+                self._emit_info(
+                    f"[URL拓扑] {self.name}: 入队 {enqueued}/{min(len(candidate_links), self.max_follow_links_per_page)}，"
+                    f"队列剩余 {len(queue)}"
+                )
 
         return bids
 
@@ -896,14 +1005,26 @@ class UrlListCrawler(BaseCrawler):
         if cookie:
             headers["Cookie"] = cookie
 
-        response = self.session.get(
-            url,
-            headers=headers,
-            timeout=self.timeout,
-            verify=False,
-            allow_redirects=True,
-        )
+        started_at = time.monotonic()
+        self._emit_info(f"[URL请求] {self.name}: HTTP GET {self._short_url(url)}")
+        try:
+            response = self.session.get(
+                url,
+                headers=headers,
+                timeout=self.timeout,
+                verify=False,
+                allow_redirects=True,
+            )
+        except Exception as exc:
+            elapsed = time.monotonic() - started_at
+            self._emit_info(f"[URL请求] {self.name}: HTTP异常 {exc.__class__.__name__}，耗时 {elapsed:.1f}s {self._short_url(url)}")
+            raise
         response.encoding = response.apparent_encoding or response.encoding or "utf-8"
+        elapsed = time.monotonic() - started_at
+        self._emit_info(
+            f"[URL请求] {self.name}: HTTP {response.status_code} {response.reason}，"
+            f"{len(response.text or '')} 字符，耗时 {elapsed:.1f}s {self._short_url(url)}"
+        )
         return response.text, response.status_code, response.reason
 
     def _request_url_with_browser(self, url: str) -> Optional[Tuple[str, int, str]]:
@@ -913,13 +1034,20 @@ class UrlListCrawler(BaseCrawler):
             self.logger.debug(f"[{self.name}] browser backend import failed: {exc}")
             return None
 
-        crawler = create_browser_crawler(self.config, self.name, url, headless=True)
-        if crawler is None:
-            return None
-        html = crawler.fetch(url)
-        if not html:
-            return None
-        return html, 200, "Browser"
+        with self._browser_fetch_lock:
+            crawler = create_browser_crawler(self.config, self.name, url, headless=True)
+            if crawler is None:
+                return None
+            self._emit_info(f"[URL浏览器] {self.name}: 开始渲染 {self._short_url(url)}")
+            started_at = time.monotonic()
+            html = crawler.fetch(url)
+            if not html:
+                self._emit_info(f"[URL浏览器] {self.name}: 渲染失败，耗时 {time.monotonic() - started_at:.1f}s {self._short_url(url)}")
+                return None
+            self._emit_info(
+                f"[URL浏览器] {self.name}: 渲染完成，{len(html)} 字符，耗时 {time.monotonic() - started_at:.1f}s {self._short_url(url)}"
+            )
+            return html, 200, "Browser"
 
     def _browser_mode_enabled(self) -> bool:
         browser_backend = self.config.get("browser_backend") or {}
@@ -930,11 +1058,38 @@ class UrlListCrawler(BaseCrawler):
         if not self._browser_mode_enabled():
             return False
         browser_backend = self.config.get("browser_backend") or {}
-        if browser_backend.get("mode") in {"browser_auto", "browser", "browser_cloak", "browser_selenium"}:
+        mode = browser_backend.get("mode")
+        if mode in {"browser", "browser_cloak", "browser_selenium"}:
             return True
         topology = self._topology_for_url(url)
         preferred_fetch = str((topology or {}).get("preferred_fetch", "")).lower()
         return "browser" in preferred_fetch
+
+    def _should_retry_browser_after_no_progress(self, url: str, prefetched_html: Optional[str]) -> bool:
+        if not self._browser_mode_enabled():
+            return False
+        if prefetched_html == "" and self._topology_seed_links(url):
+            return False
+        topology = self._topology_for_url(url)
+        if not topology:
+            return True
+        if self._prefers_browser_fetch(url):
+            return True
+        rule = self._classify_url(url)
+        return rule.get("handling") == "js_rendered_limited"
+
+    def _should_retry_browser_for_fetch_failure(self, url: str) -> bool:
+        if not self._browser_mode_enabled():
+            return False
+        if self._prefers_browser_fetch(url):
+            return True
+        topology = self._topology_for_url(url)
+        if not topology:
+            return True
+        rule = self._classify_url(url)
+        if rule.get("page_type") == "detail":
+            return True
+        return rule.get("handling") == "js_rendered_limited"
 
     def _fetch_and_extract_candidate_links(self, url: str, timestamp: str, cookie_used: bool = False) -> List[Dict[str, str]]:
         self._respect_rate_limit(url)
@@ -969,14 +1124,23 @@ class UrlListCrawler(BaseCrawler):
         if not host:
             return
 
-        now = time.monotonic()
-        last_seen = self._last_domain_request_at.get(host)
-        if last_seen is not None:
-            wait_seconds = self.domain_delay - (now - last_seen)
-            if wait_seconds > 0:
-                self.logger.info(f"[{self.name}] Rate limit {host}, sleep {wait_seconds:.1f}s")
-                time.sleep(wait_seconds)
-        self._last_domain_request_at[host] = time.monotonic()
+        with self._domain_lock(host):
+            now = time.monotonic()
+            last_seen = self._last_domain_request_at.get(host)
+            if last_seen is not None:
+                wait_seconds = self.domain_delay - (now - last_seen)
+                if wait_seconds > 0:
+                    self._emit_info(f"[URL限频] {self.name}: {host} 等待 {wait_seconds:.1f}s")
+                    time.sleep(wait_seconds)
+            self._last_domain_request_at[host] = time.monotonic()
+
+    def _domain_lock(self, host: str) -> threading.Lock:
+        with self._domain_locks_guard:
+            lock = self._domain_locks.get(host)
+            if lock is None:
+                lock = threading.Lock()
+                self._domain_locks[host] = lock
+            return lock
 
     def _parse_page(self, html: str, page_url: str, timestamp: str) -> List[BidInfo]:
         rule = self._classify_url(page_url)
@@ -1897,9 +2061,30 @@ class UrlListCrawler(BaseCrawler):
     def _matched_blocked_sign(self, html: str, url: str = "") -> str:
         visible_lower = self._visible_text_for_blocking(html).lower()
         for sign in self._blocked_signs_for_url(url):
-            if sign and sign.lower() in visible_lower:
+            sign_lower = str(sign).lower()
+            if sign and sign_lower in visible_lower:
+                if self._is_non_blocking_login_hint(sign_lower, visible_lower):
+                    continue
                 return str(sign)
         return ""
+
+    def _is_non_blocking_login_hint(self, sign: str, visible_lower: str) -> bool:
+        if sign not in {"请登录", "登录"}:
+            return False
+        hard_login_contexts = [
+            "请先登录",
+            "请登录后",
+            "登录后查看",
+            "登录即可",
+            "登录才能",
+            "登录以查看",
+            "auth-center",
+            "统一认证",
+            "会员登录",
+        ]
+        if any(context in visible_lower for context in hard_login_contexts):
+            return False
+        return self._has_public_crawl_evidence(visible_lower)
 
     def _visible_text_for_blocking(self, html: str) -> str:
         without_scripts = re.sub(
@@ -1943,9 +2128,10 @@ class UrlListCrawler(BaseCrawler):
             "page_type": rule.get("page_type", ""),
             "handling": rule.get("handling", ""),
         }
-        os.makedirs(os.path.dirname(self.diagnostics_path) or ".", exist_ok=True)
-        with open(self.diagnostics_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        with self._diagnostics_lock:
+            os.makedirs(os.path.dirname(self.diagnostics_path) or ".", exist_ok=True)
+            with open(self.diagnostics_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
         self.logger.info(f"[{self.name}] {status.upper()} {url} - {reason}")
         if callable(self.log_callback):
             self.log_callback(f"[URL诊断] {self.name} | {status} | {url} | {reason}")

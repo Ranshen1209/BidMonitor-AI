@@ -32,6 +32,19 @@ class ServerConfigDefaultsTests(unittest.TestCase):
         finally:
             app.app_state.logs = original_logs
 
+    def test_app_logs_keep_large_debug_window(self):
+        original_logs = app.app_state.logs
+        try:
+            app.app_state.logs = []
+            for index in range(20005):
+                app.app_state.add_log(f"line {index}")
+
+            self.assertEqual(len(app.app_state.logs), 20000)
+            self.assertIn("line 5", app.app_state.logs[0])
+            self.assertIn("line 20004", app.app_state.logs[-1])
+        finally:
+            app.app_state.logs = original_logs
+
     def test_default_config_targets_canonical_url_sources_first(self):
         with patch.object(app.os.path, "exists", return_value=False):
             config = app.load_config()
@@ -46,6 +59,7 @@ class ServerConfigDefaultsTests(unittest.TestCase):
         self.assertTrue(config["csv_url_sources"][0]["enabled"])
         self.assertTrue(config["csv_url_sources"][0]["file_path"].endswith("server/url_sources.json"))
         self.assertEqual(config["csv_url_sources"][0]["domain_delay"], 2)
+        self.assertEqual(config["csv_url_sources"][0]["concurrency"], 4)
         self.assertEqual(config["csv_url_sources"][0]["auth_cookies"], [])
         self.assertEqual(config["browser_backend"]["mode"], "http")
         self.assertFalse(config["browser_backend"]["cloakbrowser_enabled"])
@@ -129,6 +143,7 @@ class ServerConfigDefaultsTests(unittest.TestCase):
         self.assertEqual(source["source_type"], "json")
         self.assertEqual(source["file_path"], app.DEFAULT_URL_SOURCES_PATH)
         self.assertEqual(source["domain_delay"], 2)
+        self.assertEqual(source["concurrency"], 4)
         self.assertEqual(source["auth_cookies"], [])
 
     def test_load_config_marks_json_url_sources(self):
@@ -144,6 +159,24 @@ class ServerConfigDefaultsTests(unittest.TestCase):
             }
         )
 
+        self.assertEqual(normalized["csv_url_sources"][0]["source_type"], "json")
+
+    def test_normalize_config_repairs_stale_project_builtin_paths(self):
+        normalized = app.normalize_config(
+            {
+                "site_topologies_path": "/Users/cervine/Documents/Github/BidMonitor-AI/server/site_topologies.json",
+                "csv_url_sources": [
+                    {
+                        "name": "招标URL源",
+                        "file_path": "/Users/cervine/Documents/Github/BidMonitor-AI/server/url_sources.json",
+                        "enabled": True,
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual(normalized["site_topologies_path"], app.DEFAULT_SITE_TOPOLOGIES_PATH)
+        self.assertEqual(normalized["csv_url_sources"][0]["file_path"], app.DEFAULT_URL_SOURCES_PATH)
         self.assertEqual(normalized["csv_url_sources"][0]["source_type"], "json")
 
     def test_load_config_backfills_site_metadata_defaults(self):

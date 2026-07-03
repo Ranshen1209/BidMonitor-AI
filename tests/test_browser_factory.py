@@ -29,6 +29,33 @@ class FactoryTests(unittest.TestCase):
             c = browser_pkg.create_browser_crawler({}, "s", "https://ex.com")
             self.assertIsInstance(c, _Sel)
 
+    def test_respects_cloakbrowser_disabled_config(self):
+        with patch.object(browser_pkg, "_load_backends", return_value=(_Cloak, _Sel)):
+            c = browser_pkg.create_browser_crawler(
+                {"browser_backend": {"cloakbrowser_enabled": False}},
+                "s",
+                "https://ex.com",
+            )
+            self.assertIsInstance(c, _Sel)
+
+    def test_browser_selenium_mode_skips_cloak(self):
+        with patch.object(browser_pkg, "_load_backends", return_value=(_Cloak, _Sel)):
+            c = browser_pkg.create_browser_crawler(
+                {"browser_backend": {"mode": "browser_selenium"}},
+                "s",
+                "https://ex.com",
+            )
+            self.assertIsInstance(c, _Sel)
+
+    def test_browser_cloak_mode_does_not_fall_back_to_selenium_when_cloak_missing(self):
+        with patch.object(browser_pkg, "_load_backends", return_value=(None, _Sel)):
+            c = browser_pkg.create_browser_crawler(
+                {"browser_backend": {"mode": "browser_cloak"}},
+                "s",
+                "https://ex.com",
+            )
+            self.assertIsNone(c)
+
     def test_returns_none_when_no_backend(self):
         with patch.object(browser_pkg, "_load_backends", return_value=(None, None)):
             c = browser_pkg.create_browser_crawler({}, "s", "https://ex.com")

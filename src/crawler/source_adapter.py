@@ -68,28 +68,35 @@ class TopologySourceAdapter:
             initial_fetch_count = max(1, self._request_call_count(crawler) - request_count_before)
             result.fetched_count = initial_fetch_count
 
+            source_payload_is_json = False
+            topology_seed_html = html
+            structured_bids: list[Any] = []
             if status_code >= 400:
                 message = f"HTTP {status_code}: {status_text or 'source fetch failed'}"
                 result.errors.append(message)
-                result.error_count = 1
+                result.error_count += 1
                 result.diagnostics.append(
                     {"url": source.url, "status": "failed", "reason": message, "status_code": status_code}
                 )
-                return result
-
-            if crawler._contains_blocked_sign(html, source.url):
+                topology_seed_html = ""
+            elif crawler._contains_blocked_sign(html, source.url):
                 message = crawler._blocked_reason(html, source.url)
                 result.errors.append(message)
-                result.error_count = 1
+                result.error_count += 1
                 result.diagnostics.append(
                     {"url": source.url, "status": "failed", "reason": message, "status_code": status_code}
                 )
-                return result
+                topology_seed_html = ""
+            else:
+                source_payload_is_json = self._is_json_payload(html)
+                structured_bids = self._structured_bids_from_payload(crawler, html, source.url, timestamp, rule)
+                if source_payload_is_json:
+                    topology_seed_html = ""
 
-            source_payload_is_json = self._is_json_payload(html)
-            structured_bids = self._structured_bids_from_payload(crawler, html, source.url, timestamp, rule)
             admitted_structured_urls = self._normalized_bid_urls(structured_bids)
             topology_structured_bids: list[Any] = []
+            detail_failures: list[dict[str, Any]] = []
+            detail_failure_urls: set[str] = set()
             original_request_url = crawler._request_url
             original_should_follow_candidate = crawler._should_follow_candidate
 
@@ -99,8 +106,28 @@ class TopologySourceAdapter:
                     return "", 204, "Skipped admitted structured URL"
                 request_url_and_collect_json.call_count += 1
                 response_html, response_status, response_text = original_request_url(url)
+                response_rule = crawler._classify_url(url)
+                response_blocked = response_status < 400 and crawler._contains_blocked_sign(response_html, url)
+                if response_status >= 400 or response_blocked:
+                    if response_rule.get("page_type") == "detail":
+                        failure_key = normalized_url or url.split("#", 1)[0]
+                        if failure_key not in detail_failure_urls:
+                            detail_failure_urls.add(failure_key)
+                            if response_status >= 400:
+                                reason = f"HTTP {response_status}: {response_text or 'detail fetch failed'}"
+                            else:
+                                reason = crawler._blocked_reason(response_html, url)
+                            detail_failures.append(
+                                {
+                                    "url": url,
+                                    "status": "failed",
+                                    "reason": f"detail fetch failed: {reason}",
+                                    "status_code": response_status,
+                                    "page_type": "detail",
+                                }
+                            )
+                    return response_html, response_status, response_text
                 if response_status < 400:
-                    response_rule = crawler._classify_url(url)
                     response_structured_bids = self._structured_bids_from_payload(
                         crawler, response_html, url, timestamp, response_rule
                     )
@@ -121,7 +148,7 @@ class TopologySourceAdapter:
             crawler._should_follow_candidate = should_follow_unadmitted_candidate
             legacy_bids = crawler._crawl_topology_from_url(
                 source.url,
-                "" if source_payload_is_json else html,
+                "" if source_payload_is_json else topology_seed_html,
                 timestamp,
                 rule,
                 cookie_used=cookie_used,
@@ -129,7 +156,18 @@ class TopologySourceAdapter:
             request_delta = self._request_call_count(crawler) - request_count_before
             if request_delta > 0:
                 result.fetched_count = request_delta
-            total_candidates = len(structured_bids) + len(topology_structured_bids) + len(legacy_bids)
+            result.diagnostics.extend(detail_failures)
+            for failure in detail_failures:
+                result.errors.append(failure["reason"])
+            result.skipped_count += len(detail_failures)
+            result.error_count += len(detail_failures)
+
+            total_candidates = (
+                len(structured_bids)
+                + len(topology_structured_bids)
+                + len(legacy_bids)
+                + len(detail_failures)
+            )
             result.candidate_count = max(
                 total_candidates,
                 len(crawler._topology_seed_links(source.url)),
@@ -147,10 +185,17 @@ class TopologySourceAdapter:
                 result.notices.append(notice)
 
             result.parsed_count = len(result.notices)
+            summary_status = "success"
+            if result.errors and result.notices:
+                summary_status = "partial"
+            elif result.errors:
+                summary_status = "failed"
+            elif not result.notices:
+                summary_status = "skipped"
             result.diagnostics.append(
                 {
                     "url": source.url,
-                    "status": "success",
+                    "status": summary_status,
                     "candidate_count": result.candidate_count,
                     "parsed_count": result.parsed_count,
                 }

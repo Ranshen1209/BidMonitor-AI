@@ -210,12 +210,51 @@ class MonitorCore:
         
         # 获取启用的网站列表
         enabled = crawler_config.get('enabled_sites', [])
+        csv_url_sources = self.config.get('csv_url_sources', [])
+
+        def _is_json_url_source(source: Dict[str, Any]) -> bool:
+            file_path = source.get("file_path", "")
+            return (
+                source.get("source_type") == "json"
+                or str(file_path).lower().endswith(".json")
+            )
+
+        def _topologies_path_for(source: Dict[str, Any]) -> str:
+            return (
+                source.get("site_topologies_path")
+                or crawler_config.get("site_topologies_path")
+                or os.path.join(BASE_DIR, "server", "site_topologies.json")
+            )
+
+        source_backed_site_ids = set()
+        for source in csv_url_sources:
+            if not source.get('enabled', True) or not _is_json_url_source(source):
+                continue
+            file_path = source.get('file_path', '')
+            if not file_path:
+                continue
+            try:
+                configured_sources = build_sources(
+                    file_path,
+                    _topologies_path_for(source),
+                    enabled_site_ids=enabled,
+                    site_metadata=self.config.get("site_metadata", {}),
+                    defaults=source,
+                )
+            except Exception as e:
+                self.log(f"[WARN] Failed to inspect JSON URL source {source.get('name', 'URL列表')}: {e}")
+                continue
+            source_backed_site_ids.update(configured_source.id for configured_source in configured_sources)
         
         # 1. 加载内置爬虫类
         crawler_classes = get_all_crawlers()
+        allow_legacy_builtin_overlap = crawler_config.get('enable_legacy_builtin_crawlers', False)
         
         for name in enabled:
             if name in crawler_classes:
+                if name in source_backed_site_ids and not allow_legacy_builtin_overlap:
+                    self.log(f"[INFO] Skipped legacy crawler {name}: source-backed JSON config is enabled")
+                    continue
                 try:
                     crawler = crawler_classes[name](crawler_config)
                     crawlers.append(crawler)
@@ -276,7 +315,6 @@ class MonitorCore:
                 self.log(f"[WARN] Failed to load custom crawler {site.get('name')}: {e}")
 
         # 4. 加载 URL 清单爬虫（txt/csv）
-        csv_url_sources = self.config.get('csv_url_sources', [])
         if csv_url_sources:
             try:
                 from crawler.url_list import UrlListCrawler
@@ -288,16 +326,8 @@ class MonitorCore:
                     if not file_path:
                         self.log(f"[WARN] URL list source {name} missing file_path")
                         continue
-                    is_json_source = (
-                        source.get("source_type") == "json"
-                        or str(file_path).lower().endswith(".json")
-                    )
-                    if is_json_source:
-                        topologies_path = (
-                            source.get("site_topologies_path")
-                            or crawler_config.get("site_topologies_path")
-                            or os.path.join(BASE_DIR, "server", "site_topologies.json")
-                        )
+                    if _is_json_url_source(source):
+                        topologies_path = _topologies_path_for(source)
                         sources = build_sources(
                             file_path,
                             topologies_path,

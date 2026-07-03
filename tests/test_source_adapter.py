@@ -630,6 +630,103 @@ class TopologySourceAdapterTests(unittest.TestCase):
         self.assertEqual(len(result.notices), 1)
         self.assertEqual(result.notices[0].publish_date, "")
 
+    @patch("crawler.url_list.UrlListCrawler._request_url")
+    def test_collect_continues_seed_traversal_after_entry_http_error(self, mock_request_url):
+        def fake_request(url):
+            if url == "https://portal.example.com/":
+                return "server exploded", 500, "Internal Server Error"
+            if url == "https://portal.example.com/notices/":
+                return (
+                    "<html><body><a href='/detail/42'>上海安防工程公开招标公告</a></body></html>",
+                    200,
+                    "OK",
+                )
+            if url == "https://portal.example.com/detail/42":
+                return (
+                    "<html><body><h1>上海安防工程公开招标公告</h1>"
+                    "<p>发布时间：2026-07-02</p>"
+                    "<p>采购单位：上海测试单位。</p>"
+                    "<p>公告正文：本项目采购安防监控系统。</p></body></html>",
+                    200,
+                    "OK",
+                )
+            raise AssertionError(f"unexpected url {url}")
+
+        mock_request_url.side_effect = fake_request
+
+        result = TopologySourceAdapter({"request_delay": 0, "domain_delay": 0}).collect(make_source())
+
+        self.assertEqual(len(result.notices), 1)
+        self.assertEqual(result.notices[0].detail_url, "https://portal.example.com/detail/42")
+        self.assertEqual(result.error_count, 1)
+        self.assertTrue(any("HTTP 500" in error for error in result.errors))
+        self.assertGreaterEqual(result.candidate_count, 1)
+        self.assertEqual(result.parsed_count, 1)
+
+    @patch("crawler.url_list.UrlListCrawler._request_url")
+    def test_collect_continues_seed_traversal_after_entry_blocked_content(self, mock_request_url):
+        def fake_request(url):
+            if url == "https://portal.example.com/":
+                return "<html><body>请先登录后查看公告</body></html>", 200, "OK"
+            if url == "https://portal.example.com/notices/":
+                return (
+                    "<html><body><a href='/detail/42'>上海安防工程公开招标公告</a></body></html>",
+                    200,
+                    "OK",
+                )
+            if url == "https://portal.example.com/detail/42":
+                return (
+                    "<html><body><h1>上海安防工程公开招标公告</h1>"
+                    "<p>发布时间：2026-07-02</p>"
+                    "<p>采购单位：上海测试单位。</p>"
+                    "<p>公告正文：本项目采购安防监控系统。</p></body></html>",
+                    200,
+                    "OK",
+                )
+            raise AssertionError(f"unexpected url {url}")
+
+        mock_request_url.side_effect = fake_request
+
+        result = TopologySourceAdapter({"request_delay": 0, "domain_delay": 0}).collect(make_source())
+
+        self.assertEqual(len(result.notices), 1)
+        self.assertEqual(result.error_count, 1)
+        self.assertTrue(any("登录" in error for error in result.errors))
+        self.assertEqual(result.parsed_count, 1)
+
+    @patch("crawler.url_list.UrlListCrawler._request_url")
+    def test_collect_accounts_for_failed_detail_candidate_fetch(self, mock_request_url):
+        source = make_source()
+        source.topology["seed_urls"] = []
+
+        def fake_request(url):
+            if url == "https://portal.example.com/":
+                return (
+                    "<html><body><a href='/detail/42'>上海安防工程公开招标公告</a></body></html>",
+                    200,
+                    "OK",
+                )
+            if url == "https://portal.example.com/detail/42":
+                return "detail failed", 500, "Internal Server Error"
+            raise AssertionError(f"unexpected url {url}")
+
+        mock_request_url.side_effect = fake_request
+
+        result = TopologySourceAdapter({"request_delay": 0, "domain_delay": 0}).collect(source)
+
+        self.assertEqual(result.notices, [])
+        self.assertEqual(result.candidate_count, 1)
+        self.assertEqual(result.skipped_count, 1)
+        self.assertEqual(result.error_count, 1)
+        self.assertTrue(any("HTTP 500" in error for error in result.errors))
+        self.assertTrue(
+            any(
+                diagnostic.get("url") == "https://portal.example.com/detail/42"
+                and "detail" in diagnostic.get("reason", "").lower()
+                for diagnostic in result.diagnostics
+            )
+        )
+
     def test_notice_deduplicator_collapses_tracking_query_variants(self):
         deduplicator = NoticeDeduplicator()
         first = Notice(

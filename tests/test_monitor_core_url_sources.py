@@ -128,6 +128,57 @@ class MonitorCoreUrlSourcesTests(unittest.TestCase):
             self.assertEqual(len(source_crawlers), 1)
             self.assertEqual([source.id for source in source_crawlers[0].sources], ["source-a"])
 
+    def test_json_source_id_wins_over_legacy_crawler_with_same_enabled_site(self):
+        legacy_instances = []
+
+        class FakeLegacyChinaBiddingCrawler:
+            name = "legacy-chinabidding"
+
+            def __init__(self, config):
+                legacy_instances.append(config)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sources_path = os.path.join(tmpdir, "url_sources.json")
+            topologies_path = os.path.join(tmpdir, "site_topologies.json")
+            with open(sources_path, "w", encoding="utf-8") as f:
+                f.write(
+                    '{"sources": ['
+                    '{"id": "chinabidding", "name": "中国采购与招标网", '
+                    '"url": "https://www.chinabidding.com.cn/", "enabled": true}'
+                    ']}'
+                )
+            with open(topologies_path, "w", encoding="utf-8") as f:
+                f.write('{"sites": [{"id": "chinabidding"}]}')
+
+            with patch.object(
+                monitor_core_module,
+                "get_all_crawlers",
+                return_value={"chinabidding": FakeLegacyChinaBiddingCrawler},
+            ):
+                monitor = MonitorCore(
+                    keywords=["弱电"],
+                    notify_method="none",
+                    crawler_overrides={
+                        "enabled_sites": ["chinabidding"],
+                        "use_selenium": False,
+                        "enable_custom_sites": False,
+                        "site_topologies_path": topologies_path,
+                        "csv_url_sources": [
+                            {
+                                "name": "JSON sources",
+                                "file_path": sources_path,
+                                "source_type": "json",
+                                "enabled": True,
+                            }
+                        ],
+                    },
+                )
+
+        self.assertEqual(legacy_instances, [])
+        self.assertEqual(len(monitor.crawlers), 1)
+        self.assertIsInstance(monitor.crawlers[0], SourceBackedCrawler)
+        self.assertEqual([source.id for source in monitor.crawlers[0].sources], ["chinabidding"])
+
     @patch.object(UrlListCrawler, "_request_url")
     def test_monitor_core_run_once_saves_url_list_results_to_storage(self, mock_request_url):
         mock_request_url.return_value = (

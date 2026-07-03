@@ -217,6 +217,36 @@ class TopologySourceAdapterTests(unittest.TestCase):
         self.assertEqual(result.parsed_count, 0)
 
     @patch("crawler.url_list.UrlListCrawler._request_url")
+    def test_collect_uses_later_good_scalar_aliases_when_earlier_aliases_are_containers(self, mock_request_url):
+        payload = {
+            "records": [
+                {
+                    "title": [],
+                    "noticeTitle": "Good 招标公告",
+                    "url": {},
+                    "detailUrl": "/detail/42",
+                    "content": "本项目采购设备",
+                }
+            ]
+        }
+
+        def fake_request(url):
+            if url == "https://portal.example.com/":
+                return json.dumps(payload, ensure_ascii=False), 200, "OK"
+            raise AssertionError(f"unexpected url {url}")
+
+        mock_request_url.side_effect = fake_request
+
+        result = TopologySourceAdapter({"request_delay": 0, "domain_delay": 0}).collect(make_source())
+
+        self.assertEqual(result.errors, [])
+        self.assertEqual(len(result.notices), 1)
+        self.assertEqual(result.notices[0].title, "Good 招标公告")
+        self.assertEqual(result.notices[0].detail_url, "https://portal.example.com/detail/42")
+        self.assertNotEqual(result.notices[0].title, "[]")
+        self.assertNotEqual(result.notices[0].detail_url, "https://portal.example.com/{}")
+
+    @patch("crawler.url_list.UrlListCrawler._request_url")
     def test_collect_skips_structured_json_record_without_raw_evidence(self, mock_request_url):
         payload = {
             "records": [
@@ -409,6 +439,7 @@ class TopologySourceAdapterTests(unittest.TestCase):
         self.assertEqual(len(result.notices), 1)
         self.assertEqual(result.notices[0].detail_url, "https://portal.example.com/detail/42")
         self.assertNotIn("https://portal.example.com/detail/42", requested_urls)
+        self.assertEqual(result.fetched_count, 2)
 
     @patch("crawler.url_list.UrlListCrawler._request_url")
     def test_collect_admits_structured_json_record_from_topology_seed_api(self, mock_request_url):

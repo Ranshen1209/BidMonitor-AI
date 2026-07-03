@@ -94,10 +94,10 @@ class TopologySourceAdapter:
             original_should_follow_candidate = crawler._should_follow_candidate
 
             def request_url_and_collect_json(url: str):
-                request_url_and_collect_json.call_count += 1
                 normalized_url = normalize_notice_url(url)
                 if normalized_url and normalized_url in admitted_structured_urls:
                     return "", 204, "Skipped admitted structured URL"
+                request_url_and_collect_json.call_count += 1
                 response_html, response_status, response_text = original_request_url(url)
                 if response_status < 400:
                     response_rule = crawler._classify_url(url)
@@ -182,16 +182,17 @@ class TopologySourceAdapter:
         for record in crawler._find_json_records(parsed):
             if not isinstance(record, dict):
                 continue
-            title = _first_meaningful_json_value(record, TITLE_FIELDS).strip()
+            title = _first_meaningful_scalar_json_value(record, TITLE_FIELDS).strip()
             if not title:
                 continue
-            explicit_url = _first_meaningful_json_value(record, URL_FIELDS).strip()
+            explicit_url = _first_meaningful_scalar_json_value(record, URL_FIELDS).strip()
             if not explicit_url:
                 continue
             if not self._has_raw_structured_evidence(record):
                 continue
+            sanitized_record = _sanitized_record_for_parse(record, title, explicit_url)
             parsed_bids = crawler._parse_json_records(
-                json.dumps([record], ensure_ascii=False),
+                json.dumps([sanitized_record], ensure_ascii=False),
                 page_url,
                 timestamp,
                 rule,
@@ -284,7 +285,7 @@ def _raw_value_has_evidence(value: Any) -> bool:
     return True
 
 
-def _first_meaningful_json_value(record: dict[str, Any], fields: list[str]) -> str:
+def _first_meaningful_scalar_json_value(record: dict[str, Any], fields: list[str]) -> str:
     lowered = {str(key).lower(): value for key, value in record.items()}
     for field in fields:
         if field in record:
@@ -295,6 +296,19 @@ def _first_meaningful_json_value(record: dict[str, Any], fields: list[str]) -> s
         if value:
             return value
     return ""
+
+
+def _sanitized_record_for_parse(record: dict[str, Any], title: str, detail_url: str) -> dict[str, Any]:
+    title_fields = {field.lower() for field in TITLE_FIELDS}
+    url_fields = {field.lower() for field in URL_FIELDS}
+    sanitized = {
+        key: value
+        for key, value in record.items()
+        if str(key).lower() not in title_fields and str(key).lower() not in url_fields
+    }
+    sanitized["title"] = title
+    sanitized["url"] = detail_url
+    return sanitized
 
 
 def _meaningful_json_scalar(value: Any) -> str:

@@ -52,6 +52,8 @@ class TopologySourceAdapterTests(unittest.TestCase):
         def fake_request(url):
             if url == "https://portal.example.com/":
                 return json.dumps(payload, ensure_ascii=False), 200, "OK"
+            if url == "https://portal.example.com/notices/":
+                return "<html><body></body></html>", 200, "OK"
             raise AssertionError(f"unexpected url {url}")
 
         mock_request_url.side_effect = fake_request
@@ -80,6 +82,8 @@ class TopologySourceAdapterTests(unittest.TestCase):
         def fake_request(url):
             if url == "https://portal.example.com/":
                 return json.dumps(payload, ensure_ascii=False), 200, "OK"
+            if url == "https://portal.example.com/notices/":
+                return "<html><body></body></html>", 200, "OK"
             raise AssertionError(f"unexpected url {url}")
 
         mock_request_url.side_effect = fake_request
@@ -113,6 +117,38 @@ class TopologySourceAdapterTests(unittest.TestCase):
 
         self.assertEqual(result.notices, [])
         self.assertEqual(result.parsed_count, 0)
+
+    @patch("crawler.url_list.UrlListCrawler._request_url")
+    def test_collect_skips_structured_json_record_with_placeholder_url(self, mock_request_url):
+        for detail_url in ("javascript:void(0)", "mailto:test@example.com", "#", "tel:123"):
+            with self.subTest(detail_url=detail_url):
+                payload = {
+                    "records": [
+                        {
+                            "title": "上海智能化设备采购意向",
+                            "detailUrl": detail_url,
+                            "publishDate": "2026-07-01",
+                            "purchaser": "上海采购人",
+                            "content": "本项目采购弱电智能化系统",
+                        }
+                    ]
+                }
+
+                def fake_request(url):
+                    if url == "https://portal.example.com/":
+                        return json.dumps(payload, ensure_ascii=False), 200, "OK"
+                    if url == "https://portal.example.com/notices/":
+                        return "<html><body></body></html>", 200, "OK"
+                    raise AssertionError(f"unexpected url {url}")
+
+                mock_request_url.reset_mock(side_effect=True)
+                mock_request_url.side_effect = fake_request
+
+                result = TopologySourceAdapter({"request_delay": 0, "domain_delay": 0}).collect(make_source())
+
+                self.assertEqual(result.notices, [])
+                self.assertEqual(result.parsed_count, 0)
+                self.assertEqual(result.error_count, 0)
 
     @patch("crawler.url_list.UrlListCrawler._request_url")
     def test_collect_skips_structured_json_record_with_empty_container_title(self, mock_request_url):
@@ -235,6 +271,8 @@ class TopologySourceAdapterTests(unittest.TestCase):
         def fake_request(url):
             if url == "https://portal.example.com/":
                 return json.dumps(payload, ensure_ascii=False), 200, "OK"
+            if url == "https://portal.example.com/notices/":
+                return "<html><body></body></html>", 200, "OK"
             raise AssertionError(f"unexpected url {url}")
 
         mock_request_url.side_effect = fake_request
@@ -341,6 +379,8 @@ class TopologySourceAdapterTests(unittest.TestCase):
             requested_urls.append(url)
             if url == "https://portal.example.com/":
                 return json.dumps(payload, ensure_ascii=False), 200, "OK"
+            if url == "https://portal.example.com/notices/":
+                return "<html><body></body></html>", 200, "OK"
             if url == "https://portal.example.com/api/detail/1":
                 raise AssertionError("structured JSON detail URL should not be fetched")
             raise AssertionError(f"unexpected url {url}")
@@ -633,6 +673,33 @@ class TopologySourceAdapterTests(unittest.TestCase):
         self.assertEqual(result.notices[0].publish_date, "")
 
     @patch("crawler.url_list.UrlListCrawler._request_url")
+    def test_collect_accounts_for_failed_topology_seed_fetch(self, mock_request_url):
+        def fake_request(url):
+            if url == "https://portal.example.com/":
+                return "<html><body><a href='/notices/'>Notices</a></body></html>", 200, "OK"
+            if url == "https://portal.example.com/notices/":
+                return "list failed", 500, "Internal Server Error"
+            raise AssertionError(f"unexpected url {url}")
+
+        mock_request_url.side_effect = fake_request
+
+        result = TopologySourceAdapter({"request_delay": 0, "domain_delay": 0}).collect(make_source())
+
+        self.assertEqual(result.notices, [])
+        self.assertGreaterEqual(result.candidate_count, 1)
+        self.assertEqual(result.skipped_count, 1)
+        self.assertEqual(result.error_count, 1)
+        self.assertTrue(any("HTTP 500" in error for error in result.errors))
+        self.assertTrue(
+            any(
+                diagnostic.get("url") == "https://portal.example.com/notices/"
+                and "HTTP 500" in diagnostic.get("reason", "")
+                for diagnostic in result.diagnostics
+            )
+        )
+        self.assertEqual(result.diagnostics[-1].get("status"), "failed")
+
+    @patch("crawler.url_list.UrlListCrawler._request_url")
     def test_collect_continues_seed_traversal_after_entry_request_exception(self, mock_request_url):
         def fake_request(url):
             if url == "https://portal.example.com/":
@@ -899,6 +966,45 @@ class TopologySourceAdapterTests(unittest.TestCase):
             )
         )
         mock_browser_request.assert_called_once_with(detail_url)
+
+    @patch("crawler.url_list.UrlListCrawler._request_url")
+    def test_collect_rejects_invalid_notice_detail_url_before_append(self, mock_request_url):
+        adapter = TopologySourceAdapter({"request_delay": 0, "domain_delay": 0})
+
+        def fake_request(url):
+            if url == "https://portal.example.com/":
+                return "<html><body><a href='/notices/'>Notices</a></body></html>", 200, "OK"
+            if url == "https://portal.example.com/notices/":
+                return (
+                    "<html><body><a href='/detail/42'>上海安防工程公开招标公告</a></body></html>",
+                    200,
+                    "OK",
+                )
+            if url == "https://portal.example.com/detail/42":
+                return (
+                    "<html><body><h1>上海安防工程公开招标公告</h1>"
+                    "<p>发布时间：2026-07-02</p>"
+                    "<p>采购单位：上海测试单位。</p>"
+                    "<p>公告正文：本项目采购安防监控系统。</p></body></html>",
+                    200,
+                    "OK",
+                )
+            raise AssertionError(f"unexpected url {url}")
+
+        mock_request_url.side_effect = fake_request
+        invalid_notice = Notice(
+            source_id="portal",
+            source_name="Portal",
+            title="上海安防工程公开招标公告",
+            detail_url="javascript:void(0)",
+        )
+
+        with patch.object(adapter, "_notice_from_bid", return_value=invalid_notice):
+            result = adapter.collect(make_source())
+
+        self.assertEqual(result.notices, [])
+        self.assertEqual(result.skipped_count, 1)
+        self.assertEqual(result.parsed_count, 0)
 
     @patch("crawler.url_list.UrlListCrawler._request_url")
     def test_collect_accounts_for_failed_followed_non_detail_candidate_fetch(self, mock_request_url):

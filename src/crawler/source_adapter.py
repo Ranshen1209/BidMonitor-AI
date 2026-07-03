@@ -130,12 +130,14 @@ class TopologySourceAdapter:
                 page_type = response_rule.get("page_type", "")
                 if page_type != "detail" and failure_key not in followed_candidate_urls:
                     return
-                if page_type != "detail" and url.split("#", 1)[0] in topology_seed_urls:
-                    return
                 if failure_key in detail_failure_urls:
                     return
                 detail_failure_urls.add(failure_key)
-                failure_kind = "detail" if page_type == "detail" else "candidate"
+                failure_kind = "detail"
+                if page_type != "detail":
+                    failure_kind = (
+                        "traversal" if url.split("#", 1)[0] in topology_seed_urls else "candidate"
+                    )
                 detail_failures.append(
                     {
                         "url": url,
@@ -226,7 +228,7 @@ class TopologySourceAdapter:
             deduplicator = NoticeDeduplicator()
             for bid in structured_bids + topology_structured_bids + legacy_bids:
                 notice = self._notice_from_bid(source, bid)
-                if not notice.title or not notice.detail_url:
+                if not notice.title or not normalize_notice_url(notice.detail_url):
                     result.skipped_count += 1
                     continue
                 if not deduplicator.add(notice):
@@ -282,6 +284,8 @@ class TopologySourceAdapter:
                 continue
             explicit_url = _first_meaningful_scalar_json_value(record, URL_FIELDS).strip()
             if not explicit_url:
+                continue
+            if not _is_fetchable_notice_url(explicit_url, page_url):
                 continue
             if not self._has_raw_structured_evidence(record):
                 continue
@@ -378,6 +382,15 @@ def _raw_value_has_evidence(value: Any) -> bool:
     if isinstance(value, dict):
         return any(_raw_value_has_evidence(item) for item in value.values())
     return True
+
+
+def _is_fetchable_notice_url(value: str, page_url: str) -> bool:
+    stripped = str(value or "").strip()
+    if not stripped:
+        return False
+    if stripped.lower().startswith(("javascript:", "mailto:", "tel:", "#")):
+        return False
+    return bool(normalize_notice_url(urljoin(page_url, stripped)))
 
 
 def _first_meaningful_scalar_json_value(record: dict[str, Any], fields: list[str]) -> str:

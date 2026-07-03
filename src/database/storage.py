@@ -101,6 +101,11 @@ CRAWL_RUN_COLUMNS = {
     "error_message": "TEXT DEFAULT ''",
 }
 
+CRAWL_RUN_MIGRATION_COLUMNS = {
+    **CRAWL_RUN_COLUMNS,
+    "source_id": "TEXT DEFAULT ''",
+}
+
 
 @dataclass
 class BidInfo:
@@ -255,7 +260,7 @@ class Storage:
             row[1]
             for row in conn.execute("PRAGMA table_info(crawl_runs)").fetchall()
         }
-        for column, definition in CRAWL_RUN_COLUMNS.items():
+        for column, definition in CRAWL_RUN_MIGRATION_COLUMNS.items():
             if column not in crawl_run_columns:
                 conn.execute(f"ALTER TABLE crawl_runs ADD COLUMN {column} {definition}")
 

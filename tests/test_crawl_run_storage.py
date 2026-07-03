@@ -1,4 +1,5 @@
 import os
+import sqlite3
 import tempfile
 import unittest
 
@@ -24,6 +25,44 @@ class CrawlRunStorageTests(unittest.TestCase):
         self.assertIn("candidate_count", columns)
         self.assertIn("inserted_count", columns)
         self.assertIn("error_message", columns)
+
+    def test_storage_migrates_non_empty_crawl_runs_table_missing_source_id(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "bids.db")
+            with sqlite3.connect(db_path) as conn:
+                conn.execute(
+                    """
+                    CREATE TABLE crawl_runs (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        source_name TEXT DEFAULT '',
+                        started_at TEXT DEFAULT '',
+                        status TEXT DEFAULT 'running'
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    INSERT INTO crawl_runs (source_name, started_at, status)
+                    VALUES (?, ?, ?)
+                    """,
+                    ("Legacy Source", "2026-07-03T09:00:00", "success"),
+                )
+
+            storage = Storage(db_path)
+            conn = storage._get_connection()
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(crawl_runs)").fetchall()}
+            row = conn.execute(
+                "SELECT source_id, source_name, started_at, status FROM crawl_runs WHERE id = 1"
+            ).fetchone()
+
+        self.assertIn("source_id", columns)
+        self.assertIn("candidate_count", columns)
+        self.assertIn("error_message", columns)
+        self.assertIsNotNone(row)
+        self.assertEqual(row["source_id"], "")
+        self.assertEqual(row["source_name"], "Legacy Source")
+        self.assertEqual(row["started_at"], "2026-07-03T09:00:00")
+        self.assertEqual(row["status"], "success")
 
     def test_start_finish_increment_and_read_crawl_run(self):
         with tempfile.TemporaryDirectory() as tmpdir:

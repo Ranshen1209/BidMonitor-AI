@@ -139,12 +139,64 @@ class TopologySourceAdapterTests(unittest.TestCase):
         self.assertEqual(result.parsed_count, 0)
 
     @patch("crawler.url_list.UrlListCrawler._request_url")
+    def test_collect_skips_structured_json_record_with_nested_title(self, mock_request_url):
+        payload = {
+            "records": [
+                {
+                    "title": ["上海智能化设备采购意向"],
+                    "detailUrl": "/api/detail/1",
+                    "publishDate": "2026-07-01",
+                    "purchaser": "上海采购人",
+                    "content": "本项目采购弱电智能化系统",
+                }
+            ]
+        }
+
+        def fake_request(url):
+            if url == "https://portal.example.com/":
+                return json.dumps(payload, ensure_ascii=False), 200, "OK"
+            raise AssertionError(f"unexpected url {url}")
+
+        mock_request_url.side_effect = fake_request
+
+        result = TopologySourceAdapter({"request_delay": 0, "domain_delay": 0}).collect(make_source())
+
+        self.assertEqual(result.notices, [])
+        self.assertEqual(result.parsed_count, 0)
+
+    @patch("crawler.url_list.UrlListCrawler._request_url")
     def test_collect_skips_structured_json_record_with_empty_container_explicit_url(self, mock_request_url):
         payload = {
             "records": [
                 {
                     "title": "上海智能化设备采购意向",
                     "detailUrl": {},
+                    "publishDate": "2026-07-01",
+                    "purchaser": "上海采购人",
+                    "content": "本项目采购弱电智能化系统",
+                }
+            ]
+        }
+
+        def fake_request(url):
+            if url == "https://portal.example.com/":
+                return json.dumps(payload, ensure_ascii=False), 200, "OK"
+            raise AssertionError(f"unexpected url {url}")
+
+        mock_request_url.side_effect = fake_request
+
+        result = TopologySourceAdapter({"request_delay": 0, "domain_delay": 0}).collect(make_source())
+
+        self.assertEqual(result.notices, [])
+        self.assertEqual(result.parsed_count, 0)
+
+    @patch("crawler.url_list.UrlListCrawler._request_url")
+    def test_collect_skips_structured_json_record_with_nested_explicit_url(self, mock_request_url):
+        payload = {
+            "records": [
+                {
+                    "title": "上海智能化设备采购意向",
+                    "detailUrl": {"href": "/detail/42"},
                     "publishDate": "2026-07-01",
                     "purchaser": "上海采购人",
                     "content": "本项目采购弱电智能化系统",
@@ -485,6 +537,39 @@ class TopologySourceAdapterTests(unittest.TestCase):
         self.assertGreaterEqual(result.candidate_count, 1)
         self.assertEqual(result.parsed_count, 1)
         self.assertGreaterEqual(mock_request_url.call_count, 3)
+
+    def test_collect_counts_entry_list_and_detail_fetches_without_mock_call_count(self):
+        adapter = TopologySourceAdapter({"request_delay": 0, "domain_delay": 0})
+        source = make_source()
+        crawler = adapter._build_crawler(source)
+
+        def fake_request(url):
+            if url == "https://portal.example.com/":
+                return "<html><body><a href='/notices/'>Notices</a></body></html>", 200, "OK"
+            if url == "https://portal.example.com/notices/":
+                return (
+                    "<html><body><a href='/detail/42'>上海安防工程公开招标公告</a></body></html>",
+                    200,
+                    "OK",
+                )
+            if url == "https://portal.example.com/detail/42":
+                return (
+                    "<html><body><h1>上海安防工程公开招标公告</h1>"
+                    "<p>发布时间：2026-07-02</p>"
+                    "<p>采购单位：上海测试单位。</p>"
+                    "<p>公告正文：本项目采购安防监控系统。</p></body></html>",
+                    200,
+                    "OK",
+                )
+            raise AssertionError(f"unexpected url {url}")
+
+        crawler._request_url = fake_request
+
+        with patch.object(adapter, "_build_crawler", return_value=crawler):
+            result = adapter.collect(source)
+
+        self.assertEqual(len(result.notices), 1)
+        self.assertGreaterEqual(result.fetched_count, 3)
 
     @patch("crawler.url_list.UrlListCrawler._request_url")
     def test_collect_preserves_missing_detail_publish_date_as_empty(self, mock_request_url):

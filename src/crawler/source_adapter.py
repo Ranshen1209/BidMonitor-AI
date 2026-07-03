@@ -65,7 +65,8 @@ class TopologySourceAdapter:
             rule = crawler._classify_url(source.url)
             crawler._respect_rate_limit(source.url)
             html, status_code, status_text = crawler._request_url(source.url)
-            result.fetched_count = max(1, self._request_call_count(crawler) - request_count_before)
+            initial_fetch_count = max(1, self._request_call_count(crawler) - request_count_before)
+            result.fetched_count = initial_fetch_count
 
             if status_code >= 400:
                 message = f"HTTP {status_code}: {status_text or 'source fetch failed'}"
@@ -115,7 +116,7 @@ class TopologySourceAdapter:
                     return False
                 return original_should_follow_candidate(page_url, candidate_url, depth)
 
-            request_url_and_collect_json.call_count = self._request_call_count(crawler)
+            request_url_and_collect_json.call_count = request_count_before + initial_fetch_count
             crawler._request_url = request_url_and_collect_json
             crawler._should_follow_candidate = should_follow_unadmitted_candidate
             legacy_bids = crawler._crawl_topology_from_url(
@@ -302,15 +303,7 @@ def _meaningful_json_scalar(value: Any) -> str:
     if isinstance(value, str):
         return value.strip()
     if isinstance(value, list):
-        for item in value:
-            scalar = _meaningful_json_scalar(item)
-            if scalar:
-                return scalar
         return ""
     if isinstance(value, dict):
-        for item in value.values():
-            scalar = _meaningful_json_scalar(item)
-            if scalar:
-                return scalar
         return ""
     return str(value).strip()

@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Any, Iterable, List
 from urllib.parse import urlparse
 
+from .source_models import Source
+
 
 @dataclass(frozen=True)
 class UrlSource:
@@ -129,3 +131,53 @@ def load_url_sources(path: str) -> List[UrlSource]:
     if suffix in {".html", ".htm"}:
         return _load_bookmark_sources(source_path)
     return []
+
+
+def load_site_topologies(path: str) -> dict[str, dict[str, Any]]:
+    topology_path = Path(path)
+    if not path or not topology_path.exists():
+        return {}
+    payload = json.loads(topology_path.read_text(encoding="utf-8"))
+    records = payload.get("sites") if isinstance(payload, dict) else payload
+    if not isinstance(records, list):
+        return {}
+    result: dict[str, dict[str, Any]] = {}
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        source_id = str(record.get("id", "")).strip()
+        if source_id:
+            result[source_id] = record
+    return result
+
+
+def build_sources(
+    sources_path: str,
+    topologies_path: str,
+    enabled_site_ids: list[str] | None = None,
+    site_metadata: dict[str, dict[str, Any]] | None = None,
+    defaults: dict[str, Any] | None = None,
+) -> list[Source]:
+    enabled_filter = {str(item) for item in (enabled_site_ids or []) if item}
+    metadata = site_metadata or {}
+    defaults = defaults or {}
+    topology_by_id = load_site_topologies(topologies_path)
+    sources: list[Source] = []
+    for url_source in load_url_sources(sources_path):
+        if enabled_filter and url_source.id not in enabled_filter:
+            continue
+        source_metadata = metadata.get(url_source.id, {})
+        display_name = source_metadata.get("display_name") or url_source.name
+        sources.append(
+            Source(
+                id=url_source.id,
+                name=display_name,
+                url=url_source.url,
+                enabled=True,
+                topology=topology_by_id.get(url_source.id, {}),
+                metadata=dict(source_metadata),
+                rate_limit={"domain_delay": defaults.get("domain_delay", 0)},
+                auth_cookies=list(defaults.get("auth_cookies") or []),
+            )
+        )
+    return sources

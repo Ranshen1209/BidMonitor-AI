@@ -85,6 +85,22 @@ RESULT_QUERY_FILTERS = {
     "updated_at": "updated_at",
 }
 
+CRAWL_RUN_COLUMNS = {
+    "source_id": "TEXT NOT NULL",
+    "source_name": "TEXT DEFAULT ''",
+    "started_at": "TEXT DEFAULT ''",
+    "finished_at": "TEXT DEFAULT ''",
+    "status": "TEXT DEFAULT 'running'",
+    "fetched_count": "INTEGER DEFAULT 0",
+    "candidate_count": "INTEGER DEFAULT 0",
+    "parsed_count": "INTEGER DEFAULT 0",
+    "inserted_count": "INTEGER DEFAULT 0",
+    "updated_count": "INTEGER DEFAULT 0",
+    "skipped_count": "INTEGER DEFAULT 0",
+    "error_count": "INTEGER DEFAULT 0",
+    "error_message": "TEXT DEFAULT ''",
+}
+
 
 @dataclass
 class BidInfo:
@@ -194,6 +210,26 @@ class Storage:
                 )
                 """
             )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS crawl_runs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    source_id TEXT NOT NULL,
+                    source_name TEXT DEFAULT '',
+                    started_at TEXT DEFAULT '',
+                    finished_at TEXT DEFAULT '',
+                    status TEXT DEFAULT 'running',
+                    fetched_count INTEGER DEFAULT 0,
+                    candidate_count INTEGER DEFAULT 0,
+                    parsed_count INTEGER DEFAULT 0,
+                    inserted_count INTEGER DEFAULT 0,
+                    updated_count INTEGER DEFAULT 0,
+                    skipped_count INTEGER DEFAULT 0,
+                    error_count INTEGER DEFAULT 0,
+                    error_message TEXT DEFAULT ''
+                )
+                """
+            )
             self._migrate_schema(conn)
             cursor.execute(
                 """
@@ -215,6 +251,13 @@ class Storage:
         for column, definition in RESULT_CENTER_COLUMNS.items():
             if column not in columns:
                 conn.execute(f"ALTER TABLE bids ADD COLUMN {column} {definition}")
+        crawl_run_columns = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(crawl_runs)").fetchall()
+        }
+        for column, definition in CRAWL_RUN_COLUMNS.items():
+            if column not in crawl_run_columns:
+                conn.execute(f"ALTER TABLE crawl_runs ADD COLUMN {column} {definition}")
 
     def _json_dumps(self, value: Any) -> str:
         return json.dumps(value if value is not None else {}, ensure_ascii=False)
@@ -523,6 +566,77 @@ class Storage:
             ),
         )
         conn.commit()
+
+    def start_crawl_run(self, source_id: str, source_name: str) -> int:
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        now = datetime.utcnow().isoformat(timespec="seconds")
+        cursor.execute(
+            """
+            INSERT INTO crawl_runs (source_id, source_name, started_at, status)
+            VALUES (?, ?, ?, ?)
+            """,
+            (source_id, source_name, now, "running"),
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+    def finish_crawl_run(self, run_id: int, status: str, counts: Optional[dict] = None) -> None:
+        counts = counts or {}
+        conn = self._get_connection()
+        conn.execute(
+            """
+            UPDATE crawl_runs
+            SET finished_at = ?, status = ?, fetched_count = ?, candidate_count = ?,
+                parsed_count = ?, updated_count = ?, error_count = ?, error_message = ?
+            WHERE id = ?
+            """,
+            (
+                datetime.utcnow().isoformat(timespec="seconds"),
+                status,
+                int(counts.get("fetched_count", 0)),
+                int(counts.get("candidate_count", 0)),
+                int(counts.get("parsed_count", 0)),
+                int(counts.get("updated_count", 0)),
+                int(counts.get("error_count", 0)),
+                str(counts.get("error_message", ""))[:500],
+                run_id,
+            ),
+        )
+        conn.commit()
+
+    def increment_crawl_run_counts(
+        self,
+        run_id: int,
+        inserted_delta: int = 0,
+        updated_delta: int = 0,
+        skipped_delta: int = 0,
+    ) -> None:
+        conn = self._get_connection()
+        conn.execute(
+            """
+            UPDATE crawl_runs
+            SET inserted_count = inserted_count + ?,
+                updated_count = updated_count + ?,
+                skipped_count = skipped_count + ?
+            WHERE id = ?
+            """,
+            (inserted_delta, updated_delta, skipped_delta, run_id),
+        )
+        conn.commit()
+
+    def get_crawl_run(self, run_id: int) -> Optional[dict]:
+        conn = self._get_connection()
+        row = conn.execute("SELECT * FROM crawl_runs WHERE id = ?", (run_id,)).fetchone()
+        return dict(row) if row else None
+
+    def get_recent_crawl_runs(self, limit: int = 50) -> list[dict]:
+        conn = self._get_connection()
+        rows = conn.execute(
+            "SELECT * FROM crawl_runs ORDER BY id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(row) for row in rows]
 
     def count_all(self) -> int:
         """获取总记录数"""

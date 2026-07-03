@@ -1,0 +1,116 @@
+import os
+import sys
+import unittest
+from unittest.mock import patch
+
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SRC_DIR = os.path.join(ROOT_DIR, "src")
+if SRC_DIR not in sys.path:
+    sys.path.insert(0, SRC_DIR)
+
+from crawler.source_adapter import TopologySourceAdapter
+from crawler.source_models import Notice, NoticeDeduplicator, Source
+
+
+def make_source():
+    return Source(
+        id="portal",
+        name="Portal",
+        url="https://portal.example.com/",
+        topology={
+            "id": "portal",
+            "name": "Portal",
+            "entry_url": "https://portal.example.com/",
+            "allowed_hosts": ["portal.example.com"],
+            "seed_urls": ["https://portal.example.com/notices/"],
+            "list_url_regex": [r"/notices/?$"],
+            "detail_url_regex": [r"/detail/42$"],
+        },
+    )
+
+
+class TopologySourceAdapterTests(unittest.TestCase):
+    @patch("crawler.url_list.UrlListCrawler._request_url")
+    def test_collect_fetches_entry_list_and_detail_before_emitting_notice(self, mock_request_url):
+        def fake_request(url):
+            if url == "https://portal.example.com/":
+                return "<html><body><a href='/notices/'>Notices</a></body></html>", 200, "OK"
+            if url == "https://portal.example.com/notices/":
+                return (
+                    "<html><body><a href='/detail/42'>上海安防工程公开招标公告</a></body></html>",
+                    200,
+                    "OK",
+                )
+            if url == "https://portal.example.com/detail/42":
+                return (
+                    "<html><body><h1>上海安防工程公开招标公告</h1>"
+                    "<p>发布时间：2026-07-02</p>"
+                    "<p>采购单位：上海测试单位。</p>"
+                    "<p>公告正文：本项目采购安防监控系统。</p></body></html>",
+                    200,
+                    "OK",
+                )
+            raise AssertionError(f"unexpected url {url}")
+
+        mock_request_url.side_effect = fake_request
+
+        result = TopologySourceAdapter({"request_delay": 0, "domain_delay": 0}).collect(make_source())
+
+        self.assertEqual(len(result.notices), 1)
+        self.assertEqual(result.notices[0].detail_url, "https://portal.example.com/detail/42")
+        self.assertEqual(result.notices[0].publish_date, "2026-07-02")
+        self.assertEqual(result.notices[0].purchaser, "上海测试单位")
+        self.assertIn("本项目采购安防监控系统", result.notices[0].content)
+        self.assertGreaterEqual(result.candidate_count, 1)
+        self.assertEqual(result.parsed_count, 1)
+        self.assertGreaterEqual(mock_request_url.call_count, 3)
+
+    @patch("crawler.url_list.UrlListCrawler._request_url")
+    def test_collect_preserves_missing_detail_publish_date_as_empty(self, mock_request_url):
+        def fake_request(url):
+            if url == "https://portal.example.com/":
+                return "<html><body><a href='/notices/'>Notices</a></body></html>", 200, "OK"
+            if url == "https://portal.example.com/notices/":
+                return (
+                    "<html><body><a href='/detail/42'>上海安防工程公开招标公告</a></body></html>",
+                    200,
+                    "OK",
+                )
+            if url == "https://portal.example.com/detail/42":
+                return (
+                    "<html><body><h1>上海安防工程公开招标公告</h1>"
+                    "<p>采购单位：上海测试单位。</p>"
+                    "<p>公告正文：本项目采购安防监控系统。</p></body></html>",
+                    200,
+                    "OK",
+                )
+            raise AssertionError(f"unexpected url {url}")
+
+        mock_request_url.side_effect = fake_request
+
+        result = TopologySourceAdapter({"request_delay": 0, "domain_delay": 0}).collect(make_source())
+
+        self.assertEqual(len(result.notices), 1)
+        self.assertEqual(result.notices[0].publish_date, "")
+
+    def test_notice_deduplicator_collapses_tracking_query_variants(self):
+        deduplicator = NoticeDeduplicator()
+        first = Notice(
+            source_id="portal",
+            source_name="Portal",
+            title="上海安防工程公开招标公告",
+            detail_url="https://portal.example.com/detail/42?utm_source=list&id=42",
+        )
+        duplicate = Notice(
+            source_id="portal",
+            source_name="Portal",
+            title="上海安防工程公开招标公告",
+            detail_url="https://portal.example.com/detail/42?id=42&from=home",
+        )
+
+        self.assertTrue(deduplicator.add(first))
+        self.assertFalse(deduplicator.add(duplicate))
+
+
+if __name__ == "__main__":
+    unittest.main()

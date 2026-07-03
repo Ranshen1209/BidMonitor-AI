@@ -341,6 +341,7 @@ class UrlListCrawler(BaseCrawler):
         )
         self.domain_delay = float(source_config.get("domain_delay", config.get("domain_delay", 0)))
         self.auth_cookies = source_config.get("auth_cookies", config.get("auth_cookies", []))
+        self.preserve_missing_publish_date = bool(config.get("preserve_missing_publish_date"))
         self._last_domain_request_at: Dict[str, float] = {}
         self.site_topologies = self._load_site_topologies(
             source_config.get("site_topologies_path")
@@ -380,6 +381,9 @@ class UrlListCrawler(BaseCrawler):
 
     def parse(self, html: str) -> List[BidInfo]:
         return self._parse_page(html, self.base_url, datetime.now().isoformat(timespec="seconds"))
+
+    def _fallback_publish_date(self) -> str:
+        return "" if self.preserve_missing_publish_date else datetime.now().strftime("%Y-%m-%d")
 
     def crawl(self, stop_event=None) -> Optional[List[BidInfo]]:
         urls = self.get_list_urls()
@@ -957,7 +961,7 @@ class UrlListCrawler(BaseCrawler):
             BidInfo(
                 title=title or page_url,
                 url=page_url,
-                publish_date=fields.get("publish_date") or datetime.now().strftime("%Y-%m-%d"),
+                publish_date=fields.get("publish_date") or self._fallback_publish_date(),
                 source=self.name,
                 content=self._with_metadata(content, page_url, timestamp, fields, rule),
                 purchaser=fields.get("purchaser", ""),
@@ -1456,7 +1460,7 @@ class UrlListCrawler(BaseCrawler):
                 BidInfo(
                     title=str(title).strip(),
                     url=detail_url,
-                    publish_date=publish_date or datetime.now().strftime("%Y-%m-%d"),
+                    publish_date=publish_date or self._fallback_publish_date(),
                     source=self.name,
                     content=self._with_metadata(str(content), page_url, timestamp, fields, rule),
                     purchaser=str(purchaser).strip(),
@@ -1503,7 +1507,7 @@ class UrlListCrawler(BaseCrawler):
         fields["page_type"] = rule["page_type"]
         fields["handling"] = rule["handling"]
         fields["platform"] = rule["platform"]
-        publish_date = fields.get("publish_date") or datetime.now().strftime("%Y-%m-%d")
+        publish_date = fields.get("publish_date") or self._fallback_publish_date()
         return BidInfo(
             title=title or page_url,
             url=page_url,
@@ -1537,7 +1541,7 @@ class UrlListCrawler(BaseCrawler):
                 continue
             seen.add(full_url)
             context = self._node_context_text(a)
-            publish_date = self._extract_date(context) or datetime.now().strftime("%Y-%m-%d")
+            publish_date = self._extract_date(context) or self._fallback_publish_date()
             fields = {
                 "project_stage": self._detect_project_stage([text, context, rule.get("platform", "")]),
                 "page_type": rule["page_type"],

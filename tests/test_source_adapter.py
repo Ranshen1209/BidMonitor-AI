@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import unittest
@@ -30,6 +31,79 @@ def make_source():
 
 
 class TopologySourceAdapterTests(unittest.TestCase):
+    @patch("crawler.url_list.UrlListCrawler._request_url")
+    def test_collect_admits_structured_json_record_without_detail_fetch(self, mock_request_url):
+        payload = {
+            "data": {
+                "records": [
+                    {
+                        "title": "上海智能化设备采购意向",
+                        "detailUrl": "/api/detail/1",
+                        "publishDate": "2026-07-01",
+                        "purchaser": "上海采购人",
+                        "content": "本项目采购弱电智能化系统",
+                    }
+                ]
+            }
+        }
+
+        def fake_request(url):
+            if url == "https://portal.example.com/":
+                return json.dumps(payload, ensure_ascii=False), 200, "OK"
+            raise AssertionError(f"unexpected url {url}")
+
+        mock_request_url.side_effect = fake_request
+
+        result = TopologySourceAdapter({"request_delay": 0, "domain_delay": 0}).collect(make_source())
+
+        self.assertEqual(len(result.notices), 1)
+        self.assertEqual(result.notices[0].title, "上海智能化设备采购意向")
+        self.assertEqual(result.notices[0].detail_url, "https://portal.example.com/api/detail/1")
+        self.assertEqual(result.notices[0].publish_date, "2026-07-01")
+        self.assertEqual(result.notices[0].purchaser, "上海采购人")
+        self.assertIn("本项目采购弱电智能化系统", result.notices[0].content)
+
+    @patch("crawler.url_list.UrlListCrawler._request_url")
+    def test_collect_preserves_missing_structured_publish_date_as_empty(self, mock_request_url):
+        payload = {
+            "records": [
+                {
+                    "title": "上海智能化设备采购意向",
+                    "detailUrl": "/api/detail/1",
+                    "content": "本项目采购弱电智能化系统",
+                }
+            ]
+        }
+
+        def fake_request(url):
+            if url == "https://portal.example.com/":
+                return json.dumps(payload, ensure_ascii=False), 200, "OK"
+            raise AssertionError(f"unexpected url {url}")
+
+        mock_request_url.side_effect = fake_request
+
+        result = TopologySourceAdapter({"request_delay": 0, "domain_delay": 0}).collect(make_source())
+
+        self.assertEqual(len(result.notices), 1)
+        self.assertEqual(result.notices[0].publish_date, "")
+
+    @patch("crawler.url_list.UrlListCrawler._request_url")
+    def test_collect_does_not_emit_plain_html_list_link_without_detail_validation(self, mock_request_url):
+        def fake_request(url):
+            if url == "https://portal.example.com/":
+                return (
+                    "<html><body><a href='/detail/42'>上海安防工程公开招标公告</a></body></html>",
+                    200,
+                    "OK",
+                )
+            raise AssertionError(f"unexpected url {url}")
+
+        mock_request_url.side_effect = fake_request
+
+        result = TopologySourceAdapter({"request_delay": 0, "domain_delay": 0}).collect(make_source())
+
+        self.assertEqual(result.notices, [])
+
     @patch("crawler.url_list.UrlListCrawler._request_url")
     def test_collect_fetches_entry_list_and_detail_before_emitting_notice(self, mock_request_url):
         def fake_request(url):

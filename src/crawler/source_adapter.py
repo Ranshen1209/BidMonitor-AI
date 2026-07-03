@@ -53,6 +53,7 @@ class TopologySourceAdapter:
                 )
                 return result
 
+            structured_bids = self._structured_bids_from_payload(crawler, html, source.url, timestamp, rule)
             legacy_bids = crawler._crawl_topology_from_url(
                 source.url,
                 html,
@@ -63,10 +64,13 @@ class TopologySourceAdapter:
             request_delta = self._request_call_count(crawler) - request_count_before
             if request_delta > 0:
                 result.fetched_count = request_delta
-            result.candidate_count = max(len(legacy_bids), len(crawler._topology_seed_links(source.url)))
+            result.candidate_count = max(
+                len(structured_bids) + len(legacy_bids),
+                len(crawler._topology_seed_links(source.url)),
+            )
 
             deduplicator = NoticeDeduplicator()
-            for bid in legacy_bids:
+            for bid in structured_bids + legacy_bids:
                 notice = self._notice_from_bid(source, bid)
                 if not notice.title or not notice.detail_url:
                     result.skipped_count += 1
@@ -91,6 +95,37 @@ class TopologySourceAdapter:
             result.error_count = 1
             result.diagnostics.append({"url": source.url, "status": "failed", "reason": str(exc)})
             return result
+
+    def _structured_bids_from_payload(
+        self,
+        crawler: UrlListCrawler,
+        payload: str,
+        page_url: str,
+        timestamp: str,
+        rule: dict[str, str],
+    ) -> list[Any]:
+        stripped = (payload or "").lstrip()
+        if not stripped or stripped[0] not in "[{":
+            return []
+        return [
+            bid
+            for bid in crawler._parse_json_records(payload, page_url, timestamp, rule)
+            if self._has_structured_evidence(bid)
+        ]
+
+    def _has_structured_evidence(self, bid: Any) -> bool:
+        if getattr(bid, "publish_date", "") or getattr(bid, "purchaser", ""):
+            return True
+
+        content = getattr(bid, "content", "") or ""
+        for line in content.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            if line.startswith(("original_url:", "crawl_timestamp:", "platform:", "page_type:", "handling:")):
+                continue
+            return True
+        return False
 
     def _build_crawler(self, source: Source) -> UrlListCrawler:
         rate_limit = source.rate_limit or {}

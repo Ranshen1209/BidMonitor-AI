@@ -166,7 +166,13 @@ class MonitorCore:
             return
 
         crawler_config = self.config.get('crawler', {})
-        for key in ['enabled_sites', 'use_selenium', 'browser_backend', 'site_topologies_path']:
+        for key in [
+            'enabled_sites',
+            'use_selenium',
+            'browser_backend',
+            'site_topologies_path',
+            'enable_legacy_builtin_crawlers',
+        ]:
             if key in self.crawler_overrides:
                 crawler_config[key] = self.crawler_overrides[key]
         self.config['crawler'] = crawler_config
@@ -227,7 +233,8 @@ class MonitorCore:
             )
 
         source_backed_site_ids = set()
-        for source in csv_url_sources:
+        json_source_cache = {}
+        for index, source in enumerate(csv_url_sources):
             if not source.get('enabled', True) or not _is_json_url_source(source):
                 continue
             file_path = source.get('file_path', '')
@@ -244,6 +251,7 @@ class MonitorCore:
             except Exception as e:
                 self.log(f"[WARN] Failed to inspect JSON URL source {source.get('name', 'URL列表')}: {e}")
                 continue
+            json_source_cache[index] = configured_sources
             source_backed_site_ids.update(configured_source.id for configured_source in configured_sources)
         
         # 1. 加载内置爬虫类
@@ -318,7 +326,7 @@ class MonitorCore:
         if csv_url_sources:
             try:
                 from crawler.url_list import UrlListCrawler
-                for source in csv_url_sources:
+                for index, source in enumerate(csv_url_sources):
                     if not source.get('enabled', True):
                         continue
                     name = source.get('name', 'URL列表')
@@ -328,13 +336,15 @@ class MonitorCore:
                         continue
                     if _is_json_url_source(source):
                         topologies_path = _topologies_path_for(source)
-                        sources = build_sources(
-                            file_path,
-                            topologies_path,
-                            enabled_site_ids=enabled,
-                            site_metadata=self.config.get("site_metadata", {}),
-                            defaults=source,
-                        )
+                        sources = json_source_cache.get(index)
+                        if sources is None:
+                            sources = build_sources(
+                                file_path,
+                                topologies_path,
+                                enabled_site_ids=enabled,
+                                site_metadata=self.config.get("site_metadata", {}),
+                                defaults=source,
+                            )
                         if not sources:
                             self.log(f"[WARN] JSON URL source {name} produced no enabled sources")
                             continue

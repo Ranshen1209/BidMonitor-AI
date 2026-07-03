@@ -727,6 +727,42 @@ class TopologySourceAdapterTests(unittest.TestCase):
             )
         )
 
+    @patch("crawler.url_list.UrlListCrawler._request_url")
+    def test_collect_accounts_for_failed_followed_non_detail_candidate_fetch(self, mock_request_url):
+        source = make_source()
+        source.topology["seed_urls"] = []
+        source.topology["detail_url_regex"] = [r"/detail/\d+$"]
+
+        def fake_request(url):
+            if url == "https://portal.example.com/":
+                return (
+                    "<html><body><a href='/notice?id=42'>上海安防工程公开招标公告</a></body></html>",
+                    200,
+                    "OK",
+                )
+            if url == "https://portal.example.com/notice?id=42":
+                return "detail failed", 500, "Internal Server Error"
+            raise AssertionError(f"unexpected url {url}")
+
+        mock_request_url.side_effect = fake_request
+
+        result = TopologySourceAdapter({"request_delay": 0, "domain_delay": 0}).collect(source)
+
+        self.assertEqual(result.notices, [])
+        self.assertEqual(result.candidate_count, 1)
+        self.assertEqual(result.skipped_count, 1)
+        self.assertEqual(result.error_count, 1)
+        self.assertTrue(any("HTTP 500" in error for error in result.errors))
+        self.assertTrue(
+            any(
+                diagnostic.get("url") == "https://portal.example.com/notice?id=42"
+                and "page_type" in diagnostic
+                and diagnostic.get("page_type") != "detail"
+                and "HTTP 500" in diagnostic.get("reason", "")
+                for diagnostic in result.diagnostics
+            )
+        )
+
     def test_notice_deduplicator_collapses_tracking_query_variants(self):
         deduplicator = NoticeDeduplicator()
         first = Notice(

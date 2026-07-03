@@ -97,6 +97,7 @@ class TopologySourceAdapter:
             topology_structured_bids: list[Any] = []
             detail_failures: list[dict[str, Any]] = []
             detail_failure_urls: set[str] = set()
+            followed_candidate_urls: set[str] = set()
             original_request_url = crawler._request_url
             original_should_follow_candidate = crawler._should_follow_candidate
 
@@ -109,21 +110,23 @@ class TopologySourceAdapter:
                 response_rule = crawler._classify_url(url)
                 response_blocked = response_status < 400 and crawler._contains_blocked_sign(response_html, url)
                 if response_status >= 400 or response_blocked:
-                    if response_rule.get("page_type") == "detail":
-                        failure_key = normalized_url or url.split("#", 1)[0]
+                    failure_key = normalized_url or url.split("#", 1)[0]
+                    page_type = response_rule.get("page_type", "")
+                    if page_type == "detail" or failure_key in followed_candidate_urls:
                         if failure_key not in detail_failure_urls:
                             detail_failure_urls.add(failure_key)
                             if response_status >= 400:
                                 reason = f"HTTP {response_status}: {response_text or 'detail fetch failed'}"
                             else:
                                 reason = crawler._blocked_reason(response_html, url)
+                            failure_kind = "detail" if page_type == "detail" else "candidate"
                             detail_failures.append(
                                 {
                                     "url": url,
                                     "status": "failed",
-                                    "reason": f"detail fetch failed: {reason}",
+                                    "reason": f"{failure_kind} fetch failed: {reason}",
                                     "status_code": response_status,
-                                    "page_type": "detail",
+                                    "page_type": page_type,
                                 }
                             )
                     return response_html, response_status, response_text
@@ -138,22 +141,30 @@ class TopologySourceAdapter:
                 return response_html, response_status, response_text
 
             def should_follow_unadmitted_candidate(page_url: str, candidate_url: str, depth: int) -> bool:
-                normalized_candidate = normalize_notice_url(urljoin(page_url, candidate_url))
+                absolute_candidate = urljoin(page_url, candidate_url)
+                normalized_candidate = normalize_notice_url(absolute_candidate)
                 if normalized_candidate and normalized_candidate in admitted_structured_urls:
                     return False
-                return original_should_follow_candidate(page_url, candidate_url, depth)
+                should_follow = original_should_follow_candidate(page_url, candidate_url, depth)
+                if should_follow:
+                    followed_candidate_urls.add(normalized_candidate or absolute_candidate.split("#", 1)[0])
+                return should_follow
 
             request_url_and_collect_json.call_count = request_count_before + initial_fetch_count
             crawler._request_url = request_url_and_collect_json
             crawler._should_follow_candidate = should_follow_unadmitted_candidate
-            legacy_bids = crawler._crawl_topology_from_url(
-                source.url,
-                "" if source_payload_is_json else topology_seed_html,
-                timestamp,
-                rule,
-                cookie_used=cookie_used,
-            )
-            request_delta = self._request_call_count(crawler) - request_count_before
+            try:
+                legacy_bids = crawler._crawl_topology_from_url(
+                    source.url,
+                    "" if source_payload_is_json else topology_seed_html,
+                    timestamp,
+                    rule,
+                    cookie_used=cookie_used,
+                )
+                request_delta = self._request_call_count(crawler) - request_count_before
+            finally:
+                crawler._request_url = original_request_url
+                crawler._should_follow_candidate = original_should_follow_candidate
             if request_delta > 0:
                 result.fetched_count = request_delta
             result.diagnostics.extend(detail_failures)

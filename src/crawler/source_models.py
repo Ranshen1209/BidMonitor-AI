@@ -57,6 +57,7 @@ class Notice:
             source=self.source_name,
             content=content,
             purchaser=self.purchaser,
+            region=self.region,
         )
 
 
@@ -93,7 +94,7 @@ class NoticeDeduplicator:
             [
                 normalize_text(notice.title),
                 normalize_text(notice.purchaser),
-                notice.publish_date or "",
+                normalize_text(notice.publish_date),
                 normalize_text(notice.region),
             ]
         )
@@ -108,6 +109,19 @@ def normalize_notice_url(url: str) -> str:
     parsed = urlparse(str(url or "").strip())
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         return ""
+    scheme = parsed.scheme.lower()
+    host = (parsed.hostname or "").lower()
+    if not host:
+        return ""
+    try:
+        port = parsed.port
+    except ValueError:
+        return ""
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    netloc = host
+    if port and not ((scheme == "http" and port == 80) or (scheme == "https" and port == 443)):
+        netloc = f"{host}:{port}"
     query_items = []
     for key, value in parse_qsl(parsed.query, keep_blank_values=True):
         lower_key = key.lower()
@@ -115,5 +129,5 @@ def normalize_notice_url(url: str) -> str:
             continue
         query_items.append((key, value))
     query = urlencode(sorted(query_items), doseq=True)
-    normalized = parsed._replace(fragment="", query=query)
+    normalized = parsed._replace(scheme=scheme, netloc=netloc, fragment="", query=query)
     return urlunparse(normalized)

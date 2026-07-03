@@ -10,7 +10,7 @@ SRC_DIR = os.path.join(ROOT_DIR, "src")
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
-from crawler.source_registry import load_url_sources
+from crawler.source_registry import load_site_topologies, load_url_sources
 
 
 class UrlSourceRegistryTests(unittest.TestCase):
@@ -184,6 +184,18 @@ class UrlSourceRegistryTests(unittest.TestCase):
 
         self.assertEqual([source.id for source in sources], ["source-a"])
         self.assertEqual(sources[0].topology, {})
+
+    def test_load_site_topologies_returns_empty_for_directory_path(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self.assertEqual(load_site_topologies(tmpdir), {})
+
+    def test_load_site_topologies_returns_empty_for_invalid_utf8(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            topologies_path = os.path.join(tmpdir, "site_topologies.json")
+            with open(topologies_path, "wb") as f:
+                f.write(b"\xff\xfe\xfa")
+
+            self.assertEqual(load_site_topologies(topologies_path), {})
 
 
 if __name__ == "__main__":

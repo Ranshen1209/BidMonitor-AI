@@ -7,10 +7,28 @@ from typing import Any
 
 try:
     from .source_models import CrawlResult, Notice, NoticeDeduplicator, Source
-    from .url_list import URL_FIELDS, UrlListCrawler
+    from .url_list import (
+        CONTENT_FIELDS,
+        DATE_FIELDS,
+        PURCHASER_FIELDS,
+        SOURCE_FIELDS,
+        TITLE_FIELDS,
+        TYPE_FIELDS,
+        URL_FIELDS,
+        UrlListCrawler,
+    )
 except ImportError:  # pragma: no cover
     from crawler.source_models import CrawlResult, Notice, NoticeDeduplicator, Source
-    from crawler.url_list import URL_FIELDS, UrlListCrawler
+    from crawler.url_list import (
+        CONTENT_FIELDS,
+        DATE_FIELDS,
+        PURCHASER_FIELDS,
+        SOURCE_FIELDS,
+        TITLE_FIELDS,
+        TYPE_FIELDS,
+        URL_FIELDS,
+        UrlListCrawler,
+    )
 
 
 class TopologySourceAdapter:
@@ -54,6 +72,7 @@ class TopologySourceAdapter:
                 )
                 return result
 
+            source_payload_is_json = self._is_json_payload(html)
             structured_bids = self._structured_bids_from_payload(crawler, html, source.url, timestamp, rule)
             topology_structured_bids: list[Any] = []
             original_request_url = crawler._request_url
@@ -66,13 +85,15 @@ class TopologySourceAdapter:
                     topology_structured_bids.extend(
                         self._structured_bids_from_payload(crawler, response_html, url, timestamp, response_rule)
                     )
+                    if self._is_json_payload(response_html):
+                        return "", response_status, response_text
                 return response_html, response_status, response_text
 
             request_url_and_collect_json.call_count = self._request_call_count(crawler)
             crawler._request_url = request_url_and_collect_json
             legacy_bids = crawler._crawl_topology_from_url(
                 source.url,
-                html,
+                "" if source_payload_is_json else html,
                 timestamp,
                 rule,
                 cookie_used=cookie_used,
@@ -80,8 +101,9 @@ class TopologySourceAdapter:
             request_delta = self._request_call_count(crawler) - request_count_before
             if request_delta > 0:
                 result.fetched_count = request_delta
+            total_candidates = len(structured_bids) + len(topology_structured_bids) + len(legacy_bids)
             result.candidate_count = max(
-                len(structured_bids) + len(legacy_bids),
+                total_candidates,
                 len(crawler._topology_seed_links(source.url)),
             )
 
@@ -132,26 +154,36 @@ class TopologySourceAdapter:
         for record in crawler._find_json_records(parsed):
             if not isinstance(record, dict):
                 continue
+            title = crawler._first_json_value(record, TITLE_FIELDS).strip()
+            if not title:
+                continue
             explicit_url = crawler._first_json_value(record, URL_FIELDS).strip()
             if not explicit_url:
                 continue
-            parsed_bids = crawler._parse_json_records(json.dumps([record], ensure_ascii=False), page_url, timestamp, rule)
-            bids.extend(bid for bid in parsed_bids if self._has_structured_evidence(bid))
+            if not self._has_raw_structured_evidence(crawler, record):
+                continue
+            parsed_bids = crawler._parse_json_records(
+                json.dumps([record], ensure_ascii=False),
+                page_url,
+                timestamp,
+                rule,
+            )
+            bids.extend(parsed_bids)
         return bids
 
-    def _has_structured_evidence(self, bid: Any) -> bool:
-        if getattr(bid, "publish_date", "") or getattr(bid, "purchaser", ""):
-            return True
+    def _is_json_payload(self, payload: str) -> bool:
+        stripped = (payload or "").lstrip()
+        if not stripped or stripped[0] not in "[{":
+            return False
+        try:
+            json.loads(stripped)
+        except (TypeError, ValueError):
+            return False
+        return True
 
-        content = getattr(bid, "content", "") or ""
-        for line in content.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            if line.startswith(("original_url:", "crawl_timestamp:", "platform:", "page_type:", "handling:")):
-                continue
-            return True
-        return False
+    def _has_raw_structured_evidence(self, crawler: UrlListCrawler, record: dict[str, Any]) -> bool:
+        evidence_fields = DATE_FIELDS + PURCHASER_FIELDS + CONTENT_FIELDS + TYPE_FIELDS + SOURCE_FIELDS
+        return any(crawler._first_json_value(record, [field]).strip() for field in evidence_fields)
 
     def _build_crawler(self, source: Source) -> UrlListCrawler:
         rate_limit = source.rate_limit or {}

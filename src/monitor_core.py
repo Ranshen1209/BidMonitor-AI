@@ -47,7 +47,8 @@ except ImportError:
     from crawler.youuav import YouuavCrawler
 
 from crawler.browser import create_browser_crawler, shutdown_browsers
-from crawler.source_registry import load_url_sources
+from crawler.source_crawler import SourceBackedCrawler
+from crawler.source_registry import build_sources, load_url_sources
 
 # 爬虫注册表
 def get_all_crawlers():
@@ -287,6 +288,35 @@ class MonitorCore:
                     if not file_path:
                         self.log(f"[WARN] URL list source {name} missing file_path")
                         continue
+                    is_json_source = (
+                        source.get("source_type") == "json"
+                        or str(file_path).lower().endswith(".json")
+                    )
+                    if is_json_source:
+                        topologies_path = (
+                            source.get("site_topologies_path")
+                            or crawler_config.get("site_topologies_path")
+                            or os.path.join(BASE_DIR, "server", "site_topologies.json")
+                        )
+                        sources = build_sources(
+                            file_path,
+                            topologies_path,
+                            enabled_site_ids=enabled,
+                            site_metadata=self.config.get("site_metadata", {}),
+                            defaults=source,
+                        )
+                        if not sources:
+                            self.log(f"[WARN] JSON URL source {name} produced no enabled sources")
+                            continue
+                        crawler = SourceBackedCrawler(
+                            sources,
+                            crawler_config,
+                            storage_provider=lambda self=self: self.storage,
+                            log_callback=self.log,
+                        )
+                        crawlers.append(crawler)
+                        self.log(f"[OK] Loaded source-backed crawler: {name}")
+                        continue
                     crawler = UrlListCrawler(crawler_config, source)
                     crawlers.append(crawler)
                     self.log(f"[OK] Loaded URL list crawler: {name}")
@@ -392,6 +422,11 @@ class MonitorCore:
                         if not self.storage.exists(bid):
                             result_id = self.storage.save(bid, notified=False)
                             if result_id:
+                                if bid.crawl_run_id:
+                                    self.storage.increment_crawl_run_counts(
+                                        bid.crawl_run_id,
+                                        inserted_delta=1,
+                                    )
                                 all_matched_bids.append(bid)
                                 matched_count += 1
                                 enrich_new_bid(
@@ -402,6 +437,11 @@ class MonitorCore:
                                     log_callback=self.log,
                                     fetch_config=self.config.get('crawler', {}),
                                 )
+                        elif bid.crawl_run_id:
+                            self.storage.increment_crawl_run_counts(
+                                bid.crawl_run_id,
+                                skipped_delta=1,
+                            )
                 
                 self.log(f"[OK] {crawler.name}: Found {len(bids)} items, {matched_count} new matches")
                 

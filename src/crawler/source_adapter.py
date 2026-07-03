@@ -1,15 +1,16 @@
 """Adapters that expose source-backed crawls as Notice results."""
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from typing import Any
 
 try:
     from .source_models import CrawlResult, Notice, NoticeDeduplicator, Source
-    from .url_list import UrlListCrawler
+    from .url_list import URL_FIELDS, UrlListCrawler
 except ImportError:  # pragma: no cover
     from crawler.source_models import CrawlResult, Notice, NoticeDeduplicator, Source
-    from crawler.url_list import UrlListCrawler
+    from crawler.url_list import URL_FIELDS, UrlListCrawler
 
 
 class TopologySourceAdapter:
@@ -54,6 +55,21 @@ class TopologySourceAdapter:
                 return result
 
             structured_bids = self._structured_bids_from_payload(crawler, html, source.url, timestamp, rule)
+            topology_structured_bids: list[Any] = []
+            original_request_url = crawler._request_url
+
+            def request_url_and_collect_json(url: str):
+                request_url_and_collect_json.call_count += 1
+                response_html, response_status, response_text = original_request_url(url)
+                if response_status < 400:
+                    response_rule = crawler._classify_url(url)
+                    topology_structured_bids.extend(
+                        self._structured_bids_from_payload(crawler, response_html, url, timestamp, response_rule)
+                    )
+                return response_html, response_status, response_text
+
+            request_url_and_collect_json.call_count = self._request_call_count(crawler)
+            crawler._request_url = request_url_and_collect_json
             legacy_bids = crawler._crawl_topology_from_url(
                 source.url,
                 html,
@@ -70,7 +86,7 @@ class TopologySourceAdapter:
             )
 
             deduplicator = NoticeDeduplicator()
-            for bid in structured_bids + legacy_bids:
+            for bid in structured_bids + topology_structured_bids + legacy_bids:
                 notice = self._notice_from_bid(source, bid)
                 if not notice.title or not notice.detail_url:
                     result.skipped_count += 1
@@ -107,11 +123,21 @@ class TopologySourceAdapter:
         stripped = (payload or "").lstrip()
         if not stripped or stripped[0] not in "[{":
             return []
-        return [
-            bid
-            for bid in crawler._parse_json_records(payload, page_url, timestamp, rule)
-            if self._has_structured_evidence(bid)
-        ]
+        try:
+            parsed = json.loads(stripped)
+        except (TypeError, ValueError):
+            return []
+
+        bids: list[Any] = []
+        for record in crawler._find_json_records(parsed):
+            if not isinstance(record, dict):
+                continue
+            explicit_url = crawler._first_json_value(record, URL_FIELDS).strip()
+            if not explicit_url:
+                continue
+            parsed_bids = crawler._parse_json_records(json.dumps([record], ensure_ascii=False), page_url, timestamp, rule)
+            bids.extend(bid for bid in parsed_bids if self._has_structured_evidence(bid))
+        return bids
 
     def _has_structured_evidence(self, bid: Any) -> bool:
         if getattr(bid, "publish_date", "") or getattr(bid, "purchaser", ""):

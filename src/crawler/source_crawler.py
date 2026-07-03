@@ -43,13 +43,14 @@ class CrawlRunner:
         return "success"
 
     def _counts_for(self, result: CrawlResult) -> dict[str, Any]:
+        error_message = "; ".join(result.errors)[:500]
         return {
             "fetched_count": result.fetched_count,
             "candidate_count": result.candidate_count,
             "parsed_count": result.parsed_count,
             "skipped_count": result.skipped_count,
             "error_count": result.error_count,
-            "error_message": "; ".join(result.errors),
+            "error_message": error_message,
         }
 
 

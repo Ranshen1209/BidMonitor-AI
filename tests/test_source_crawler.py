@@ -1,5 +1,6 @@
 import os
 import sys
+import tempfile
 import unittest
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -9,6 +10,7 @@ if SRC_DIR not in sys.path:
 
 from crawler.source_crawler import CrawlRunner, SourceBackedCrawler
 from crawler.source_models import CrawlResult, Notice, Source
+from database.storage import Storage
 
 
 class FakeAdapter:
@@ -124,6 +126,58 @@ class CrawlRunnerTests(unittest.TestCase):
         self.assertEqual(counts["error_count"], 1)
         self.assertEqual(counts["error_message"], "source fetch failed")
 
+    def test_run_source_truncates_error_message_before_finishing_run(self):
+        source = make_source()
+        long_error = "error detail " * 60
+        result = CrawlResult(
+            notices=[],
+            fetched_count=1,
+            error_count=1,
+            errors=[long_error],
+        )
+        storage = FakeStorage()
+        runner = CrawlRunner(storage, adapter=FakeAdapter(result))
+
+        runner.run_source(source)
+
+        _run_id, _status, counts = storage.finished[0]
+        self.assertLessEqual(len(counts["error_message"]), 500)
+        self.assertEqual(counts["error_message"], long_error[:500])
+
+    def test_run_source_persists_successful_crawl_run_with_real_storage(self):
+        source = make_source()
+        notice = make_notice(source)
+        result = CrawlResult(
+            notices=[notice],
+            fetched_count=2,
+            candidate_count=3,
+            parsed_count=1,
+            skipped_count=0,
+            error_count=0,
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            storage = Storage(os.path.join(tmpdir, "bids.db"))
+            try:
+                runner = CrawlRunner(storage, adapter=FakeAdapter(result))
+
+                bids = runner.run_source(source)
+                run = storage.get_recent_crawl_runs(limit=1)[0]
+            finally:
+                storage.close()
+
+        self.assertEqual(run["source_id"], "source-a")
+        self.assertEqual(run["source_name"], "Source A")
+        self.assertEqual(run["status"], "success")
+        self.assertEqual(run["fetched_count"], 2)
+        self.assertEqual(run["candidate_count"], 3)
+        self.assertEqual(run["parsed_count"], 1)
+        self.assertEqual(run["skipped_count"], 0)
+        self.assertEqual(run["error_count"], 0)
+        self.assertEqual(run["error_message"], "")
+        self.assertEqual(len(bids), 1)
+        self.assertEqual(bids[0].crawl_run_id, run["id"])
+        self.assertEqual(bids[0].source_id, "source-a")
+
 
 class SourceBackedCrawlerTests(unittest.TestCase):
     def test_crawl_runs_all_sources_and_returns_all_tagged_bids(self):
@@ -155,6 +209,43 @@ class SourceBackedCrawlerTests(unittest.TestCase):
         self.assertEqual([bid.crawl_run_id for bid in bids], [101, 102])
         self.assertEqual([call[0] for _config, adapter in adapters for call in adapter.calls], sources)
         self.assertEqual([config for config, _adapter in adapters], [{"request_delay": 0}, {"request_delay": 0}])
+
+    def test_crawl_persists_one_real_crawl_run_per_source(self):
+        sources = [make_source("source-a", "Source A"), make_source("source-b", "Source B")]
+        adapters = []
+
+        def adapter_factory(config):
+            source = sources[len(adapters)]
+            adapter = FakeAdapter(
+                CrawlResult(
+                    notices=[make_notice(source)],
+                    fetched_count=1,
+                    candidate_count=1,
+                    parsed_count=1,
+                )
+            )
+            adapters.append(adapter)
+            return adapter
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            storage = Storage(os.path.join(tmpdir, "bids.db"))
+            crawler = SourceBackedCrawler(
+                sources,
+                {"request_delay": 0},
+                lambda: storage,
+                adapter_factory=adapter_factory,
+            )
+            try:
+                bids = crawler.crawl()
+                runs = storage.get_recent_crawl_runs(limit=10)
+            finally:
+                storage.close()
+
+        self.assertEqual(len(runs), 2)
+        self.assertEqual({run["source_id"] for run in runs}, {"source-a", "source-b"})
+        self.assertEqual({run["status"] for run in runs}, {"success"})
+        self.assertEqual([bid.source_id for bid in bids], ["source-a", "source-b"])
+        self.assertEqual({bid.crawl_run_id for bid in bids}, {run["id"] for run in runs})
 
 
 if __name__ == "__main__":

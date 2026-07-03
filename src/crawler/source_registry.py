@@ -137,7 +137,10 @@ def load_site_topologies(path: str) -> dict[str, dict[str, Any]]:
     topology_path = Path(path)
     if not path or not topology_path.exists():
         return {}
-    payload = json.loads(topology_path.read_text(encoding="utf-8"))
+    try:
+        payload = json.loads(topology_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
     records = payload.get("sites") if isinstance(payload, dict) else payload
     if not isinstance(records, list):
         return {}

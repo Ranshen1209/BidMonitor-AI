@@ -161,6 +161,30 @@ class UrlSourceRegistryTests(unittest.TestCase):
         self.assertEqual([source.id for source in sources], ["source-a"])
         self.assertEqual(sources[0].topology, {})
 
+    def test_build_sources_uses_empty_topology_when_topologies_json_is_invalid(self):
+        from crawler.source_registry import build_sources
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sources_path = os.path.join(tmpdir, "url_sources.json")
+            topologies_path = os.path.join(tmpdir, "site_topologies.json")
+            with open(sources_path, "w", encoding="utf-8") as f:
+                json.dump(
+                    {
+                        "sources": [
+                            {"id": "source-a", "name": "源 A", "url": "https://a.example/", "enabled": True},
+                        ]
+                    },
+                    f,
+                    ensure_ascii=False,
+                )
+            with open(topologies_path, "w", encoding="utf-8") as f:
+                f.write("{not-valid-json")
+
+            sources = build_sources(sources_path, topologies_path)
+
+        self.assertEqual([source.id for source in sources], ["source-a"])
+        self.assertEqual(sources[0].topology, {})
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -64,7 +64,16 @@ class TopologySourceAdapter:
 
             rule = crawler._classify_url(source.url)
             crawler._respect_rate_limit(source.url)
-            html, status_code, status_text = crawler._request_url(source.url)
+            try:
+                html, status_code, status_text = crawler._request_url(source.url)
+            except Exception as exc:
+                message = f"{exc.__class__.__name__}: {exc}"
+                result.errors.append(message)
+                result.error_count += 1
+                result.diagnostics.append(
+                    {"url": source.url, "status": "failed", "reason": message, "status_code": 0}
+                )
+                html, status_code, status_text = "", 0, str(exc)
             initial_fetch_count = max(1, self._request_call_count(crawler) - request_count_before)
             result.fetched_count = initial_fetch_count
 
@@ -100,35 +109,64 @@ class TopologySourceAdapter:
             followed_candidate_urls: set[str] = set()
             original_request_url = crawler._request_url
             original_should_follow_candidate = crawler._should_follow_candidate
+            topology_seed_urls = {
+                link.get("url", "").split("#", 1)[0] for link in crawler._topology_seed_links(source.url)
+            }
+
+            def record_candidate_failure(
+                url: str,
+                response_rule: dict[str, str],
+                reason: str,
+                status_code: int = 0,
+            ) -> None:
+                normalized_url = normalize_notice_url(url)
+                failure_key = normalized_url or url.split("#", 1)[0]
+                page_type = response_rule.get("page_type", "")
+                if page_type != "detail" and failure_key not in followed_candidate_urls:
+                    return
+                if page_type != "detail" and url.split("#", 1)[0] in topology_seed_urls:
+                    return
+                if failure_key in detail_failure_urls:
+                    return
+                detail_failure_urls.add(failure_key)
+                failure_kind = "detail" if page_type == "detail" else "candidate"
+                detail_failures.append(
+                    {
+                        "url": url,
+                        "status": "failed",
+                        "reason": f"{failure_kind} fetch failed: {reason}",
+                        "status_code": status_code,
+                        "page_type": page_type,
+                    }
+                )
 
             def request_url_and_collect_json(url: str):
                 normalized_url = normalize_notice_url(url)
                 if normalized_url and normalized_url in admitted_structured_urls:
                     return "", 204, "Skipped admitted structured URL"
                 request_url_and_collect_json.call_count += 1
-                response_html, response_status, response_text = original_request_url(url)
                 response_rule = crawler._classify_url(url)
+                try:
+                    response_html, response_status, response_text = original_request_url(url)
+                except Exception as exc:
+                    record_candidate_failure(
+                        url,
+                        response_rule,
+                        f"{exc.__class__.__name__}: {exc}",
+                    )
+                    raise
                 response_blocked = response_status < 400 and crawler._contains_blocked_sign(response_html, url)
                 if response_status >= 400 or response_blocked:
-                    failure_key = normalized_url or url.split("#", 1)[0]
-                    page_type = response_rule.get("page_type", "")
-                    if page_type == "detail" or failure_key in followed_candidate_urls:
-                        if failure_key not in detail_failure_urls:
-                            detail_failure_urls.add(failure_key)
-                            if response_status >= 400:
-                                reason = f"HTTP {response_status}: {response_text or 'detail fetch failed'}"
-                            else:
-                                reason = crawler._blocked_reason(response_html, url)
-                            failure_kind = "detail" if page_type == "detail" else "candidate"
-                            detail_failures.append(
-                                {
-                                    "url": url,
-                                    "status": "failed",
-                                    "reason": f"{failure_kind} fetch failed: {reason}",
-                                    "status_code": response_status,
-                                    "page_type": page_type,
-                                }
-                            )
+                    if response_status >= 400:
+                        reason = f"HTTP {response_status}: {response_text or 'detail fetch failed'}"
+                    else:
+                        reason = crawler._blocked_reason(response_html, url)
+                    record_candidate_failure(
+                        url,
+                        response_rule,
+                        reason,
+                        response_status,
+                    )
                     return response_html, response_status, response_text
                 if response_status < 400:
                     response_structured_bids = self._structured_bids_from_payload(

@@ -165,6 +165,20 @@ class CrawlRunStorageTests(unittest.TestCase):
         self.assertEqual([run["id"] for run in runs], [third_id, second_id])
         self.assertNotIn(first_id, [run["id"] for run in runs])
 
+    def test_clear_all_removes_crawl_runs(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            storage = Storage(os.path.join(tmpdir, "bids.db"))
+
+            run_id = storage.start_crawl_run("source-a", "Source A")
+            storage.finish_crawl_run(run_id, "success")
+            self.assertEqual(len(storage.get_recent_crawl_runs()), 1)
+
+            storage.clear_all()
+
+            runs = storage.get_recent_crawl_runs()
+
+        self.assertEqual(runs, [])
+
 
 if __name__ == "__main__":
     unittest.main()

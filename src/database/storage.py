@@ -665,4 +665,5 @@ class Storage:
         conn = self._get_connection()
         cursor = conn.cursor()
         cursor.execute("DELETE FROM bids")
+        cursor.execute("DELETE FROM crawl_runs")
         conn.commit()

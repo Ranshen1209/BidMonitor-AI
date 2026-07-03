@@ -136,6 +136,57 @@ class TopologySourceAdapterTests(unittest.TestCase):
         self.assertEqual(result.parsed_count, 0)
 
     @patch("crawler.url_list.UrlListCrawler._request_url")
+    def test_collect_skips_structured_json_record_with_empty_container_evidence(self, mock_request_url):
+        for empty_content in ([], {}):
+            with self.subTest(empty_content=empty_content):
+                payload = {
+                    "records": [
+                        {
+                            "title": "上海智能化设备采购意向",
+                            "detailUrl": "/api/detail/1",
+                            "content": empty_content,
+                        }
+                    ]
+                }
+
+                def fake_request(url):
+                    if url == "https://portal.example.com/":
+                        return json.dumps(payload, ensure_ascii=False), 200, "OK"
+                    raise AssertionError(f"unexpected url {url}")
+
+                mock_request_url.reset_mock(side_effect=True)
+                mock_request_url.side_effect = fake_request
+
+                result = TopologySourceAdapter({"request_delay": 0, "domain_delay": 0}).collect(make_source())
+
+                self.assertEqual(result.notices, [])
+                self.assertEqual(result.parsed_count, 0)
+
+    @patch("crawler.url_list.UrlListCrawler._request_url")
+    def test_collect_admits_structured_json_record_with_nested_raw_evidence(self, mock_request_url):
+        payload = {
+            "records": [
+                {
+                    "title": "上海智能化设备采购意向",
+                    "detailUrl": "/api/detail/1",
+                    "content": {"summary": "本项目采购弱电"},
+                }
+            ]
+        }
+
+        def fake_request(url):
+            if url == "https://portal.example.com/":
+                return json.dumps(payload, ensure_ascii=False), 200, "OK"
+            raise AssertionError(f"unexpected url {url}")
+
+        mock_request_url.side_effect = fake_request
+
+        result = TopologySourceAdapter({"request_delay": 0, "domain_delay": 0}).collect(make_source())
+
+        self.assertEqual(len(result.notices), 1)
+        self.assertEqual(result.notices[0].detail_url, "https://portal.example.com/api/detail/1")
+
+    @patch("crawler.url_list.UrlListCrawler._request_url")
     def test_collect_initial_structured_json_record_does_not_fetch_detail_url(self, mock_request_url):
         payload = {
             "records": [
@@ -165,6 +216,44 @@ class TopologySourceAdapterTests(unittest.TestCase):
         self.assertEqual(result.error_count, 0)
         self.assertEqual(len(result.notices), 1)
         self.assertNotIn("https://portal.example.com/api/detail/1", requested_urls)
+
+    @patch("crawler.url_list.UrlListCrawler._request_url")
+    def test_collect_skips_topology_detail_fetch_for_initial_structured_url(self, mock_request_url):
+        payload = {
+            "records": [
+                {
+                    "title": "上海安防工程公开招标公告",
+                    "detailUrl": "/detail/42",
+                    "publishDate": "2026-07-02",
+                    "purchaser": "上海测试单位",
+                    "content": "本项目采购安防监控系统。",
+                }
+            ]
+        }
+        requested_urls = []
+
+        def fake_request(url):
+            requested_urls.append(url)
+            if url == "https://portal.example.com/":
+                return json.dumps(payload, ensure_ascii=False), 200, "OK"
+            if url == "https://portal.example.com/notices/":
+                return (
+                    "<html><body><a href='/detail/42'>上海安防工程公开招标公告</a></body></html>",
+                    200,
+                    "OK",
+                )
+            if url == "https://portal.example.com/detail/42":
+                raise AssertionError("already-admitted structured URL should not be fetched as detail")
+            raise AssertionError(f"unexpected url {url}")
+
+        mock_request_url.side_effect = fake_request
+
+        result = TopologySourceAdapter({"request_delay": 0, "domain_delay": 0}).collect(make_source())
+
+        self.assertEqual(result.errors, [])
+        self.assertEqual(len(result.notices), 1)
+        self.assertEqual(result.notices[0].detail_url, "https://portal.example.com/detail/42")
+        self.assertNotIn("https://portal.example.com/detail/42", requested_urls)
 
     @patch("crawler.url_list.UrlListCrawler._request_url")
     def test_collect_admits_structured_json_record_from_topology_seed_api(self, mock_request_url):

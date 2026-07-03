@@ -4,9 +4,16 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from typing import Any
+from urllib.parse import urljoin
 
 try:
-    from .source_models import CrawlResult, Notice, NoticeDeduplicator, Source
+    from .source_models import (
+        CrawlResult,
+        Notice,
+        NoticeDeduplicator,
+        Source,
+        normalize_notice_url,
+    )
     from .url_list import (
         CONTENT_FIELDS,
         DATE_FIELDS,
@@ -18,7 +25,13 @@ try:
         UrlListCrawler,
     )
 except ImportError:  # pragma: no cover
-    from crawler.source_models import CrawlResult, Notice, NoticeDeduplicator, Source
+    from crawler.source_models import (
+        CrawlResult,
+        Notice,
+        NoticeDeduplicator,
+        Source,
+        normalize_notice_url,
+    )
     from crawler.url_list import (
         CONTENT_FIELDS,
         DATE_FIELDS,
@@ -74,23 +87,34 @@ class TopologySourceAdapter:
 
             source_payload_is_json = self._is_json_payload(html)
             structured_bids = self._structured_bids_from_payload(crawler, html, source.url, timestamp, rule)
+            admitted_structured_urls = self._normalized_bid_urls(structured_bids)
             topology_structured_bids: list[Any] = []
             original_request_url = crawler._request_url
+            original_should_follow_candidate = crawler._should_follow_candidate
 
             def request_url_and_collect_json(url: str):
                 request_url_and_collect_json.call_count += 1
                 response_html, response_status, response_text = original_request_url(url)
                 if response_status < 400:
                     response_rule = crawler._classify_url(url)
-                    topology_structured_bids.extend(
-                        self._structured_bids_from_payload(crawler, response_html, url, timestamp, response_rule)
+                    response_structured_bids = self._structured_bids_from_payload(
+                        crawler, response_html, url, timestamp, response_rule
                     )
+                    topology_structured_bids.extend(response_structured_bids)
+                    admitted_structured_urls.update(self._normalized_bid_urls(response_structured_bids))
                     if self._is_json_payload(response_html):
                         return "", response_status, response_text
                 return response_html, response_status, response_text
 
+            def should_follow_unadmitted_candidate(page_url: str, candidate_url: str, depth: int) -> bool:
+                normalized_candidate = normalize_notice_url(urljoin(page_url, candidate_url))
+                if normalized_candidate and normalized_candidate in admitted_structured_urls:
+                    return False
+                return original_should_follow_candidate(page_url, candidate_url, depth)
+
             request_url_and_collect_json.call_count = self._request_call_count(crawler)
             crawler._request_url = request_url_and_collect_json
+            crawler._should_follow_candidate = should_follow_unadmitted_candidate
             legacy_bids = crawler._crawl_topology_from_url(
                 source.url,
                 "" if source_payload_is_json else html,
@@ -160,7 +184,7 @@ class TopologySourceAdapter:
             explicit_url = crawler._first_json_value(record, URL_FIELDS).strip()
             if not explicit_url:
                 continue
-            if not self._has_raw_structured_evidence(crawler, record):
+            if not self._has_raw_structured_evidence(record):
                 continue
             parsed_bids = crawler._parse_json_records(
                 json.dumps([record], ensure_ascii=False),
@@ -181,9 +205,23 @@ class TopologySourceAdapter:
             return False
         return True
 
-    def _has_raw_structured_evidence(self, crawler: UrlListCrawler, record: dict[str, Any]) -> bool:
+    def _has_raw_structured_evidence(self, record: dict[str, Any]) -> bool:
         evidence_fields = DATE_FIELDS + PURCHASER_FIELDS + CONTENT_FIELDS + TYPE_FIELDS + SOURCE_FIELDS
-        return any(crawler._first_json_value(record, [field]).strip() for field in evidence_fields)
+        lowered = {str(key).lower(): value for key, value in record.items()}
+        for field in evidence_fields:
+            if field in record and _raw_value_has_evidence(record[field]):
+                return True
+            if _raw_value_has_evidence(lowered.get(field.lower())):
+                return True
+        return False
+
+    def _normalized_bid_urls(self, bids: list[Any]) -> set[str]:
+        urls: set[str] = set()
+        for bid in bids:
+            normalized_url = normalize_notice_url(getattr(bid, "url", ""))
+            if normalized_url:
+                urls.add(normalized_url)
+        return urls
 
     def _build_crawler(self, source: Source) -> UrlListCrawler:
         rate_limit = source.rate_limit or {}
@@ -228,3 +266,15 @@ class TopologySourceAdapter:
     def _request_call_count(self, crawler: UrlListCrawler) -> int:
         call_count = getattr(crawler._request_url, "call_count", None)
         return call_count if isinstance(call_count, int) else 0
+
+
+def _raw_value_has_evidence(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, list):
+        return any(_raw_value_has_evidence(item) for item in value)
+    if isinstance(value, dict):
+        return any(_raw_value_has_evidence(item) for item in value.values())
+    return True

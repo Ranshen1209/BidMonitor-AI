@@ -110,6 +110,7 @@ class TopologySourceAdapter:
             detail_failure_urls: set[str] = set()
             followed_candidate_urls: set[str] = set()
             original_request_url = crawler._request_url
+            original_request_url_with_browser = crawler._request_url_with_browser
             original_should_follow_candidate = crawler._should_follow_candidate
             had_topology_fetch_failure_callback = hasattr(crawler, "_topology_fetch_failure_callback")
             original_topology_fetch_failure_callback = getattr(
@@ -176,6 +177,10 @@ class TopologySourceAdapter:
                         return "", response_status, response_text
                 return response_html, response_status, response_text
 
+            def request_url_with_browser_and_count(url: str):
+                request_url_with_browser_and_count.call_count += 1
+                return original_request_url_with_browser(url)
+
             def should_follow_unadmitted_candidate(page_url: str, candidate_url: str, depth: int) -> bool:
                 absolute_candidate = urljoin(page_url, candidate_url)
                 normalized_candidate = normalize_notice_url(absolute_candidate)
@@ -187,7 +192,9 @@ class TopologySourceAdapter:
                 return should_follow
 
             request_url_and_collect_json.call_count = request_count_before + initial_fetch_count
+            request_url_with_browser_and_count.call_count = 0
             crawler._request_url = request_url_and_collect_json
+            crawler._request_url_with_browser = request_url_with_browser_and_count
             crawler._should_follow_candidate = should_follow_unadmitted_candidate
             crawler._topology_fetch_failure_callback = record_topology_fetch_failure
             try:
@@ -199,15 +206,18 @@ class TopologySourceAdapter:
                     cookie_used=cookie_used,
                 )
                 request_delta = self._request_call_count(crawler) - request_count_before
+                browser_request_delta = request_url_with_browser_and_count.call_count
             finally:
                 crawler._request_url = original_request_url
+                crawler._request_url_with_browser = original_request_url_with_browser
                 crawler._should_follow_candidate = original_should_follow_candidate
                 if had_topology_fetch_failure_callback:
                     crawler._topology_fetch_failure_callback = original_topology_fetch_failure_callback
                 elif hasattr(crawler, "_topology_fetch_failure_callback"):
                     delattr(crawler, "_topology_fetch_failure_callback")
-            if request_delta > 0:
-                result.fetched_count = request_delta
+            total_fetch_delta = request_delta + browser_request_delta
+            if total_fetch_delta > 0:
+                result.fetched_count = total_fetch_delta
             result.diagnostics.extend(detail_failures)
             for failure in detail_failures:
                 result.errors.append(failure["reason"])
@@ -228,7 +238,7 @@ class TopologySourceAdapter:
             deduplicator = NoticeDeduplicator()
             for bid in structured_bids + topology_structured_bids + legacy_bids:
                 notice = self._notice_from_bid(source, bid)
-                if not notice.title or not normalize_notice_url(notice.detail_url):
+                if not notice.title or not _is_admissible_notice_detail_url(notice.detail_url):
                     result.skipped_count += 1
                     continue
                 if not deduplicator.add(notice):
@@ -388,9 +398,24 @@ def _is_fetchable_notice_url(value: str, page_url: str) -> bool:
     stripped = str(value or "").strip()
     if not stripped:
         return False
+    if _has_notice_url_template_marker(stripped):
+        return False
     if stripped.lower().startswith(("javascript:", "mailto:", "tel:", "#")):
         return False
-    return bool(normalize_notice_url(urljoin(page_url, stripped)))
+    normalized_url = normalize_notice_url(urljoin(page_url, stripped))
+    return bool(normalized_url) and not _has_notice_url_template_marker(normalized_url)
+
+
+def _is_admissible_notice_detail_url(value: str) -> bool:
+    stripped = str(value or "").strip()
+    if not stripped or _has_notice_url_template_marker(stripped):
+        return False
+    normalized_url = normalize_notice_url(stripped)
+    return bool(normalized_url) and not _has_notice_url_template_marker(normalized_url)
+
+
+def _has_notice_url_template_marker(value: str) -> bool:
+    return any(marker in str(value or "") for marker in ("{{", "}}", "${", "{", "}", "<", ">"))
 
 
 def _first_meaningful_scalar_json_value(record: dict[str, Any], fields: list[str]) -> str:

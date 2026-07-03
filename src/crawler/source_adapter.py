@@ -94,6 +94,9 @@ class TopologySourceAdapter:
 
             def request_url_and_collect_json(url: str):
                 request_url_and_collect_json.call_count += 1
+                normalized_url = normalize_notice_url(url)
+                if normalized_url and normalized_url in admitted_structured_urls:
+                    return "", 204, "Skipped admitted structured URL"
                 response_html, response_status, response_text = original_request_url(url)
                 if response_status < 400:
                     response_rule = crawler._classify_url(url)
@@ -178,10 +181,10 @@ class TopologySourceAdapter:
         for record in crawler._find_json_records(parsed):
             if not isinstance(record, dict):
                 continue
-            title = crawler._first_json_value(record, TITLE_FIELDS).strip()
+            title = _first_meaningful_json_value(record, TITLE_FIELDS).strip()
             if not title:
                 continue
-            explicit_url = crawler._first_json_value(record, URL_FIELDS).strip()
+            explicit_url = _first_meaningful_json_value(record, URL_FIELDS).strip()
             if not explicit_url:
                 continue
             if not self._has_raw_structured_evidence(record):
@@ -278,3 +281,36 @@ def _raw_value_has_evidence(value: Any) -> bool:
     if isinstance(value, dict):
         return any(_raw_value_has_evidence(item) for item in value.values())
     return True
+
+
+def _first_meaningful_json_value(record: dict[str, Any], fields: list[str]) -> str:
+    lowered = {str(key).lower(): value for key, value in record.items()}
+    for field in fields:
+        if field in record:
+            value = _meaningful_json_scalar(record[field])
+            if value:
+                return value
+        value = _meaningful_json_scalar(lowered.get(field.lower()))
+        if value:
+            return value
+    return ""
+
+
+def _meaningful_json_scalar(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, list):
+        for item in value:
+            scalar = _meaningful_json_scalar(item)
+            if scalar:
+                return scalar
+        return ""
+    if isinstance(value, dict):
+        for item in value.values():
+            scalar = _meaningful_json_scalar(item)
+            if scalar:
+                return scalar
+        return ""
+    return str(value).strip()

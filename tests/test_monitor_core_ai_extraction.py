@@ -19,6 +19,13 @@ class NonMatchingFakeCrawler:
         return [BidInfo("普通办公用品采购", "https://example.com/b", "2026-07-01", "源", "办公耗材")]
 
 
+class AiOnlyOpportunityCrawler:
+    name = "fake"
+
+    def crawl(self, stop_event=None):
+        return [BidInfo("消防维保服务采购公告", "https://example.com/c", "2026-07-01", "源", "消防设施维护")]
+
+
 class MonitorCoreAIExtractionTests(unittest.TestCase):
     @patch("src.monitor_core.Storage")
     @patch("src.monitor_core.get_all_crawlers", return_value={})
@@ -122,3 +129,55 @@ class MonitorCoreAIExtractionTests(unittest.TestCase):
 
         self.assertTrue(enrich.call_args.kwargs["fetch_config"]["use_selenium"])
         self.assertEqual(enrich.call_args.kwargs["fetch_config"]["browser_backend"]["mode"], "browser_auto")
+
+    @patch("src.monitor_core.Storage")
+    @patch("src.monitor_core.get_all_crawlers", return_value={})
+    @patch("src.monitor_core.get_default_sites", return_value={})
+    def test_ai_only_policy_notifies_ai_relevant_without_keyword_match(self, _sites, _classes, storage_cls):
+        storage = Mock(spec=Storage)
+        storage.exists.return_value = False
+        storage.save.return_value = 123
+        storage_cls.return_value = storage
+        monitor = MonitorCore(
+            keywords=["智能化"],
+            crawler_overrides={
+                "enabled_sites": [],
+                "notification_policy": "keyword_or_ai",
+            },
+            ai_config={"enable": False},
+        )
+        monitor.crawlers = [AiOnlyOpportunityCrawler()]
+        monitor.ai_guard = Mock()
+        monitor.ai_guard.check_relevance.return_value = (True, "边界机会")
+
+        with patch("src.monitor_core.enrich_new_bid"):
+            result = monitor.run_once()
+
+        self.assertEqual(result["matched_count"], 1)
+        storage.mark_notified.assert_not_called()
+
+    @patch("src.monitor_core.Storage")
+    @patch("src.monitor_core.get_all_crawlers", return_value={})
+    @patch("src.monitor_core.get_default_sites", return_value={})
+    def test_strict_policy_does_not_notify_on_ai_error(self, _sites, _classes, storage_cls):
+        storage = Mock(spec=Storage)
+        storage.exists.return_value = False
+        storage.save.return_value = 123
+        storage_cls.return_value = storage
+        monitor = MonitorCore(
+            keywords=["智能化"],
+            crawler_overrides={
+                "enabled_sites": [],
+                "notification_policy": "strict_keyword_and_ai",
+            },
+            ai_config={"enable": False},
+        )
+        monitor.crawlers = [FakeCrawler()]
+        monitor.ai_guard = Mock()
+        monitor.ai_guard.check_relevance.return_value = (False, "AI请求异常: boom")
+
+        with patch("src.monitor_core.enrich_new_bid"):
+            result = monitor.run_once()
+
+        self.assertEqual(result["matched_count"], 0)
+        storage.mark_notified.assert_called_once()

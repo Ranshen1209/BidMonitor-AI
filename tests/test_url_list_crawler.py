@@ -312,6 +312,25 @@ class UrlListCrawlerTests(unittest.TestCase):
                 self.assertFalse(crawler._is_valid_traversal_url(candidate_url))
                 self.assertFalse(crawler._should_follow_candidate(page_url, candidate_url, 0))
 
+    def test_rejects_static_and_binary_extensions_in_query_values(self):
+        crawler = self.make_crawler_with_source_config(
+            "/tmp/missing.txt",
+            None,
+            {"topology_max_depth": 2},
+        )
+        page_url = "https://portal.example.com/list"
+
+        rejected = [
+            "https://portal.example.com/file?id=notice.pdf",
+            "https://portal.example.com/resource?url=/assets/app.css",
+            "https://portal.example.com/get?name=%E9%99%84%E4%BB%B6.docx",
+        ]
+
+        for candidate_url in rejected:
+            with self.subTest(candidate_url=candidate_url):
+                self.assertFalse(crawler._is_valid_traversal_url(candidate_url))
+                self.assertFalse(crawler._should_follow_candidate(page_url, candidate_url, 0))
+
     def test_candidate_extraction_skips_invalid_url_shapes(self):
         crawler = self.make_crawler_with_source_config(
             "/tmp/missing.txt",

@@ -12,7 +12,7 @@ from datetime import datetime
 from html.parser import HTMLParser
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import urljoin, urlparse
+from urllib.parse import parse_qsl, unquote, urljoin, urlparse
 
 try:
     import requests
@@ -1338,6 +1338,18 @@ class UrlListCrawler(BaseCrawler):
         _, ext = os.path.splitext(path_lower.rstrip("/"))
         if ext in STATIC_OR_BINARY_EXTENSIONS:
             return False
+        raw_query_values = [
+            part.partition("=")[2] if "=" in part else part
+            for part in parsed.query.split("&")
+            if part
+        ]
+        decoded_query_values = [value for _, value in parse_qsl(parsed.query, keep_blank_values=True)]
+        for value in raw_query_values + decoded_query_values:
+            for candidate in {value, unquote(value)}:
+                candidate_path = urlparse(candidate).path.lower()
+                _, candidate_ext = os.path.splitext(candidate_path.rstrip("/"))
+                if candidate_ext in STATIC_OR_BINARY_EXTENSIONS:
+                    return False
         path_and_query = f"{path_lower}?{query_lower}"
         if any(term in path_and_query for term in DOWNLOAD_PATH_TERMS):
             return False
@@ -1364,8 +1376,6 @@ class UrlListCrawler(BaseCrawler):
     def _should_follow_candidate(self, page_url: str, candidate_url: str, depth: int) -> bool:
         if not self._is_valid_traversal_url(candidate_url):
             return False
-        parsed = urlparse(candidate_url)
-        current = urlparse(page_url)
         if not self._is_allowed_topology_host(page_url, candidate_url):
             return False
         rule = self._classify_url(candidate_url)

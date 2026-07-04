@@ -332,6 +332,41 @@ class UrlListCrawlerTests(unittest.TestCase):
 
         self.assertEqual([link["url"] for link in links], ["https://portal.example.com/detail/1"])
 
+    def test_embedded_topology_urls_skip_invalid_url_shapes(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            topology_path = self.write_topologies(
+                tmpdir,
+                [
+                    {
+                        "id": "portal",
+                        "name": "示例公告门户",
+                        "entry_url": "https://portal.example.com/list",
+                        "allowed_hosts": ["portal.example.com"],
+                        "list_url_regex": [r"/list$"],
+                        "detail_url_regex": [r"/(?:detail/\d+|file-web/downloadFile)$"],
+                    }
+                ],
+            )
+            crawler = self.make_crawler_with_source_config(
+                "/tmp/missing.txt",
+                None,
+                {"topology_max_depth": 2},
+                config={"site_topologies_path": topology_path},
+            )
+            html = (
+                "<script>"
+                "window.__DATA__ = {"
+                "'url': 'https://portal.example.com/file-web/downloadFile?id=abc',"
+                "'title': '上海安防工程公开招标公告',"
+                "'detail': 'https://portal.example.com/detail/1'"
+                "};"
+                "</script>"
+            )
+
+            links = crawler._extract_candidate_links_from_html(html, "https://portal.example.com/list")
+
+            self.assertEqual([link["url"] for link in links], ["https://portal.example.com/detail/1"])
+
     @patch.object(UrlListCrawler, "_request_url")
     def test_entry_http_exception_without_browser_still_tries_topology_seeds(self, mock_request_url):
         def fake_request(url):

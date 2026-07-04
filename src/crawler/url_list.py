@@ -1290,6 +1290,8 @@ class UrlListCrawler(BaseCrawler):
             candidates.append({"title": title, "url": detail_url})
         for match in re.finditer(r"['\"](?P<url>https?://[^'\"]+)['\"]", html, re.IGNORECASE):
             full_url = match.group("url").strip()
+            if not self._is_valid_traversal_url(full_url):
+                continue
             if full_url in seen or not self._is_allowed_topology_host(page_url, full_url):
                 continue
             if not self._classify_url_by_topology(full_url, topology):

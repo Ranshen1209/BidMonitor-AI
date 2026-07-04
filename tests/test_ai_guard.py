@@ -102,6 +102,39 @@ class AIGuardTests(unittest.TestCase):
         self.assertFalse(relevant)
         self.assertIn("不相关", reason)
 
+    def test_ambiguous_non_json_response_returns_unknown_reason(self):
+        response = Mock()
+        response.status_code = 200
+        response.json.return_value = {"choices": [{"message": {"content": "模型输出无法判断"}}]}
+        config = {
+            "enable": True,
+            "base_url": "https://api.example.com/v1",
+            "api_key": "secret",
+            "model": "grok-4.20-fast",
+            "endpoint_type": "chat_completions",
+        }
+
+        with patch("requests.post", return_value=response):
+            relevant, reason = AIGuard(config).check_relevance("平台首页", "欢迎访问")
+
+        self.assertFalse(relevant)
+        self.assertIn("AI结果未知", reason)
+
+    def test_network_error_returns_unknown_when_ai_enabled(self):
+        config = {
+            "enable": True,
+            "base_url": "https://api.example.com/v1",
+            "api_key": "secret",
+            "model": "grok-4.20-fast",
+            "endpoint_type": "chat_completions",
+        }
+
+        with patch("requests.post", side_effect=Exception("boom")):
+            relevant, reason = AIGuard(config).check_relevance("智能化公开招标", "视频监控")
+
+        self.assertFalse(relevant)
+        self.assertIn("AI请求异常", reason)
+
     def test_default_prompt_uses_configured_business_keywords_not_legacy_drone_domain(self):
         response = Mock()
         response.status_code = 200

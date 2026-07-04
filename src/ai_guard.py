@@ -141,8 +141,7 @@ class AIGuard:
         if any(re.search(pattern, lower) for pattern in positive_patterns):
             return True
 
-        # AI output was malformed and ambiguous. Do not drop a bid solely on that basis.
-        return True
+        return None
 
     def check_relevance(self, title, content="", raise_on_error=False):
         """
@@ -252,6 +251,9 @@ class AIGuard:
                         # 如果无法解析JSON，尝试从文本判断
                         self.log(f"⚠️ [AI分析] 返回非标准JSON，尝试文本分析")
                         is_relevant = self._infer_relevance_from_text(ai_content)
+                        if is_relevant is None:
+                            self.log(f"⚠️ [AI判定] 未知 - {ai_content[:80]}")
+                            return False, f"AI结果未知: {ai_content[:60]}"
                         if is_relevant:
                             self.log(f"✅ [AI判定] 相关 - {ai_content[:80]}")
                         else:
@@ -267,15 +269,15 @@ class AIGuard:
                         self.log(f"❌ [AI分析] 网络异常，已重试{max_retries}次仍失败")
                         if raise_on_error:
                             raise
-                        return True, f"AI网络异常（已重试{max_retries}次）"
+                        return False, f"AI请求异常: 网络异常（已重试{max_retries}次）"
 
         except ImportError:
             self.log(f"❌ [AI分析] 缺少requests库")
-            return True, "请安装 requests 库: pip install requests"
+            return False, "AI请求异常: 请安装 requests 库"
         except Exception as e:
             error_msg = str(e)
             self.log(f"❌ [AI分析] 请求失败: {error_msg[:100]}")
             self.logger.error(f"AI请求失败: {error_msg}")
             if raise_on_error:
                 raise
-            return True, f"AI请求异常: {error_msg[:50]}"
+            return False, f"AI请求异常: {error_msg[:50]}"

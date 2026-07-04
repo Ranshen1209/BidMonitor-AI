@@ -62,6 +62,8 @@ class AIExtractor:
     def _parse_json_text(self, text: str) -> dict:
         if not isinstance(text, str):
             raise ValueError("AI response text is missing")
+        if not text.strip():
+            raise ValueError("AI response text is missing")
         cleaned = self._extract_json_object_text(text)
         try:
             data = json.loads(cleaned)

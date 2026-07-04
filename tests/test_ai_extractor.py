@@ -63,6 +63,12 @@ class AIExtractorTests(unittest.TestCase):
 
         self.assertEqual(data["region"], "上海")
 
+    def test_parse_json_text_rejects_empty_response_as_missing(self):
+        for text in ("", "   \n\t"):
+            with self.subTest(text=repr(text)):
+                with self.assertRaisesRegex(ValueError, "AI response text is missing"):
+                    AIExtractor({})._parse_json_text(text)
+
     def test_test_connection_uses_responses_endpoint(self):
         config = {
             "enable": True,
@@ -176,6 +182,16 @@ class AIExtractorTests(unittest.TestCase):
 
         with patch("src.results.ai_extractor.requests.post", return_value=response):
             with self.assertRaises(ValueError):
+                AIExtractor(config).extract("标题", "https://e.test", "源", "2026-07-01", "摘要", "详情")
+
+    def test_extract_rejects_missing_output_text_as_missing(self):
+        config = {"enable": True, "base_url": "https://api.example.com/v1", "api_key": "secret", "model": "grok", "endpoint_type": "responses"}
+        response = Mock()
+        response.status_code = 200
+        response.json.return_value = {}
+
+        with patch("src.results.ai_extractor.requests.post", return_value=response):
+            with self.assertRaisesRegex(ValueError, "AI response text is missing"):
                 AIExtractor(config).extract("标题", "https://e.test", "源", "2026-07-01", "摘要", "详情")
 
     def test_enrich_new_bid_preserves_manual_urgency(self):

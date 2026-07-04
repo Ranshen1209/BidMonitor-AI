@@ -141,12 +141,6 @@ DOWNLOAD_PATH_TERMS = [
     "export",
 ]
 
-NON_ANNOUNCEMENT_URL_PATTERNS = [
-    r"chinabidding\.com/.+[-/]News\.html(?:$|\?)",
-    r"plap\.mil\.cn/.+/(dishonesty|suspended|warning)\.html(?:$|\?)",
-    r"bidchance\.com/company[-/][^?#]+\.html(?:$|\?)",
-]
-
 PLATFORM_SHELL_TITLES = {
     "国投集团电子采购平台",
     "中国招标网",
@@ -1493,7 +1487,26 @@ class UrlListCrawler(BaseCrawler):
         return rule.get("page_type") in {"detail", "list", "search", "home"} or depth + 1 <= self.topology_max_depth
 
     def _is_known_non_announcement_url(self, url: str) -> bool:
-        return self._matches_any_pattern(url, NON_ANNOUNCEMENT_URL_PATTERNS)
+        parsed = urlparse(url)
+        host = parsed.netloc.lower().split(":")[0]
+        path = parsed.path.lower()
+
+        if self._host_matches_domain(host, "chinabidding.com"):
+            return re.fullmatch(r"/infodetail/[^/]+-news\.html", path) is not None
+
+        if self._host_matches_domain(host, "plap.mil.cn"):
+            filename = path.rsplit("/", 1)[-1]
+            if filename not in {"dishonesty.html", "suspended.html", "warning.html"}:
+                return False
+            return any(key.lower() == "id" for key, _ in parse_qsl(parsed.query, keep_blank_values=True))
+
+        if self._host_matches_domain(host, "bidchance.com"):
+            return re.fullmatch(r"/company-[^/]+\.html", path) is not None
+
+        return False
+
+    def _host_matches_domain(self, host: str, domain: str) -> bool:
+        return host == domain or host.endswith(f".{domain}")
 
     def _is_admissible_detail_bid(self, bid: BidInfo, page_url: str) -> bool:
         text = self._normalize_space(f"{bid.title} {bid.content}")

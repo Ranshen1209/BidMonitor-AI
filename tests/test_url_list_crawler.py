@@ -112,6 +112,26 @@ class UrlListCrawlerTests(unittest.TestCase):
             with self.subTest(url=url):
                 self.assertTrue(crawler._is_known_non_announcement_url(url))
 
+    def test_known_non_announcement_url_patterns_do_not_match_unrelated_hosts_or_paths(self):
+        crawler = self.make_crawler_with_source_config("/tmp/missing.txt", None, {})
+        accepted = [
+            "https://notchinabidding.com/infoDetail/123-News.html",
+            "https://fakeplap.mil.cn/freecms/site/juncai/dishonesty.html?id=1",
+            "https://notbidchance.com/company-123.html",
+            "https://www.chinabidding.com/other/123-News.html",
+            "https://www.plap.mil.cn/freecms/site/juncai/dishonesty.html",
+            "https://chance.bidchance.com/company/123.html",
+        ]
+
+        for url in accepted:
+            with self.subTest(url=url):
+                self.assertFalse(crawler._is_known_non_announcement_url(url))
+
+        self.assertNotEqual(
+            crawler._classify_url("https://notchinabidding.com/infoDetail/123-News.html")["handling"],
+            "non_announcement",
+        )
+
     def test_rejects_platform_shell_title_without_structured_fields(self):
         crawler = self.make_crawler_with_source_config("/tmp/missing.txt", None, {})
         bid = type(

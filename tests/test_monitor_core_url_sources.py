@@ -237,7 +237,9 @@ class MonitorCoreUrlSourcesTests(unittest.TestCase):
     @patch.object(UrlListCrawler, "_request_url")
     def test_monitor_core_run_once_saves_url_list_results_to_storage(self, mock_request_url):
         mock_request_url.return_value = (
-            "<html><body><h1>上海弱电公开招标公告</h1><p>综合布线和安防监控项目。</p></body></html>",
+            "<html><body><h1>上海弱电公开招标公告</h1>"
+            "<p>发布时间：2026-07-03</p><p>采购单位：上海测试单位</p>"
+            "<p>综合布线和安防监控项目。</p></body></html>",
             200,
             "OK",
         )

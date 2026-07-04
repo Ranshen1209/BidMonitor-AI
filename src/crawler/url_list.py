@@ -125,6 +125,24 @@ NEGATIVE_LINK_KEYWORDS = [
     "js",
 ]
 
+STATIC_OR_BINARY_EXTENSIONS = {
+    ".css", ".js", ".mjs", ".map", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg",
+    ".ico", ".woff", ".woff2", ".ttf", ".eot", ".pdf", ".doc", ".docx", ".xls",
+    ".xlsx", ".ppt", ".pptx", ".zip", ".rar", ".7z", ".tar", ".gz",
+}
+
+DOWNLOAD_PATH_TERMS = [
+    "download",
+    "downloadfile",
+    "file-web",
+    "attachment",
+    "attach",
+    "enclosure",
+    "export",
+]
+
+HASH_LOGIN_TERMS = ["#/login", "#/signin", "#/auth", "#/user/login"]
+
 FIELD_STOP_LABELS = [
     "采购项目名称",
     "招标项目名称",
@@ -1185,6 +1203,8 @@ class UrlListCrawler(BaseCrawler):
         candidates: List[Dict[str, str]] = []
         seen: set[str] = set()
         for bid in self._extract_announcement_links(soup, page_url, datetime.now().isoformat(timespec="seconds"), rule):
+            if not self._is_valid_traversal_url(bid.url):
+                continue
             if bid.url in seen:
                 continue
             seen.add(bid.url)
@@ -1196,6 +1216,8 @@ class UrlListCrawler(BaseCrawler):
             if not href or href.lower().startswith(("javascript:", "mailto:", "tel:", "#")):
                 continue
             full_url = urljoin(page_url, href)
+            if not self._is_valid_traversal_url(full_url):
+                continue
             if full_url in seen:
                 continue
             if self._is_traversal_link(text, full_url, page_url):
@@ -1227,6 +1249,8 @@ class UrlListCrawler(BaseCrawler):
             if not raw_url or raw_url.lower().startswith(("javascript:", "mailto:", "tel:", "#")):
                 continue
             full_url = urljoin(page_url, raw_url)
+            if not self._is_valid_traversal_url(full_url):
+                continue
             if full_url in seen or not self._is_allowed_topology_host(page_url, full_url):
                 continue
             if not self._classify_url_by_topology(full_url, topology) and not self._is_traversal_link("", full_url, page_url):
@@ -1296,7 +1320,30 @@ class UrlListCrawler(BaseCrawler):
                 return self._normalize_space(match.group(1))
         return ""
 
+    def _is_valid_traversal_url(self, url: str) -> bool:
+        if not url:
+            return False
+        if "{" in url or "}" in url or "${" in url:
+            return False
+        parsed = urlparse(url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            return False
+        lowered_full = url.lower()
+        if any(term in lowered_full for term in HASH_LOGIN_TERMS):
+            return False
+        path_lower = parsed.path.lower()
+        query_lower = parsed.query.lower()
+        _, ext = os.path.splitext(path_lower.rstrip("/"))
+        if ext in STATIC_OR_BINARY_EXTENSIONS:
+            return False
+        path_and_query = f"{path_lower}?{query_lower}"
+        if any(term in path_and_query for term in DOWNLOAD_PATH_TERMS):
+            return False
+        return True
+
     def _is_traversal_link(self, text: str, url: str, page_url: str) -> bool:
+        if not self._is_valid_traversal_url(url):
+            return False
         parsed = urlparse(url)
         seed = urlparse(page_url)
         if parsed.netloc and seed.netloc and not self._is_allowed_topology_host(page_url, url):
@@ -1313,10 +1360,10 @@ class UrlListCrawler(BaseCrawler):
         )
 
     def _should_follow_candidate(self, page_url: str, candidate_url: str, depth: int) -> bool:
+        if not self._is_valid_traversal_url(candidate_url):
+            return False
         parsed = urlparse(candidate_url)
         current = urlparse(page_url)
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-            return False
         if not self._is_allowed_topology_host(page_url, candidate_url):
             return False
         rule = self._classify_url(candidate_url)

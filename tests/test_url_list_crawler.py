@@ -290,6 +290,48 @@ class UrlListCrawlerTests(unittest.TestCase):
 
         self.assertEqual(bids, [])
 
+    def test_rejects_download_static_template_and_hash_login_candidates(self):
+        crawler = self.make_crawler_with_source_config(
+            "/tmp/missing.txt",
+            None,
+            {"topology_max_depth": 2},
+        )
+        page_url = "https://portal.example.com/list"
+
+        rejected = [
+            "https://portal.example.com/file-web/downloadFile?id=abc",
+            "https://portal.example.com/notice.docx",
+            "https://portal.example.com/assets/app.css",
+            "https://portal.example.com/${pingbiao.url}",
+            "https://portal.example.com/#/login",
+            "https://portal.example.com/login#/login",
+        ]
+
+        for candidate_url in rejected:
+            with self.subTest(candidate_url=candidate_url):
+                self.assertFalse(crawler._is_valid_traversal_url(candidate_url))
+                self.assertFalse(crawler._should_follow_candidate(page_url, candidate_url, 0))
+
+    def test_candidate_extraction_skips_invalid_url_shapes(self):
+        crawler = self.make_crawler_with_source_config(
+            "/tmp/missing.txt",
+            None,
+            {"topology_max_depth": 2},
+        )
+        html = (
+            "<html><body>"
+            "<a href='/file-web/downloadFile?id=abc'>招标文件下载</a>"
+            "<a href='/assets/app.css'>采购样式</a>"
+            "<a href='${pingbiao.url}'>采购公告模板</a>"
+            "<a href='/#/login'>采购登录</a>"
+            "<a href='/detail/1'>上海安防工程公开招标公告</a>"
+            "</body></html>"
+        )
+
+        links = crawler._extract_candidate_links_from_html(html, "https://portal.example.com/list")
+
+        self.assertEqual([link["url"] for link in links], ["https://portal.example.com/detail/1"])
+
     @patch.object(UrlListCrawler, "_request_url")
     def test_entry_http_exception_without_browser_still_tries_topology_seeds(self, mock_request_url):
         def fake_request(url):

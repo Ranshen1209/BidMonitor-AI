@@ -100,6 +100,12 @@ class AIExtractorTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "AI response is not valid JSON"):
             AIExtractor({})._parse_json_text(text)
 
+    def test_parse_json_text_does_not_extract_inner_object_from_prose_wrapped_invalid_json_object(self):
+        text = "Result:\n{\"outer\": {\"inner\": 1}"
+
+        with self.assertRaisesRegex(ValueError, "AI response is not valid JSON"):
+            AIExtractor({})._parse_json_text(text)
+
     def test_test_connection_uses_responses_endpoint(self):
         config = {
             "enable": True,

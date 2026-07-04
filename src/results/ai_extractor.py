@@ -68,22 +68,13 @@ class AIExtractor:
         try:
             data = json.loads(cleaned)
         except json.JSONDecodeError as exc:
-            if cleaned.lstrip().startswith("{"):
-                raise ValueError("AI response is not valid JSON") from exc
             first_token = self._find_first_json_token_index(cleaned)
-            if first_token is not None and cleaned[first_token] == "[":
-                try:
-                    array_data, _end = json.JSONDecoder().raw_decode(cleaned, first_token)
-                except json.JSONDecodeError:
-                    raise ValueError("AI response is not valid JSON") from exc
-                if isinstance(array_data, list):
-                    raise ValueError("AI response JSON must be an object") from exc
-            embedded, skipped_array_object = self._find_embedded_json_object_text(cleaned)
-            if embedded is None:
-                if skipped_array_object:
-                    raise ValueError("AI response JSON must be an object") from exc
+            if first_token is None:
                 raise ValueError("AI response is not valid JSON") from exc
-            data = json.loads(embedded)
+            try:
+                data, _end = json.JSONDecoder().raw_decode(cleaned, first_token)
+            except json.JSONDecodeError:
+                raise ValueError("AI response is not valid JSON") from exc
         if not isinstance(data, dict):
             raise ValueError("AI response JSON must be an object")
         return data
@@ -112,63 +103,6 @@ class AIExtractor:
             elif char in "{[":
                 return index
         return None
-
-    def _find_embedded_json_object_text(self, text: str) -> tuple[str | None, bool]:
-        decoder = json.JSONDecoder()
-        skipped_array_object = False
-        for match in re.finditer(r"\{", text):
-            start = match.start()
-            try:
-                data, end = decoder.raw_decode(text, start)
-            except json.JSONDecodeError:
-                continue
-            if not isinstance(data, dict):
-                continue
-            if self._is_array_object_candidate(text, start, end):
-                skipped_array_object = True
-                continue
-            return text[start:end], skipped_array_object
-        return None, skipped_array_object
-
-    def _is_array_object_candidate(self, text: str, start: int, end: int) -> bool:
-        if self._array_depth_before(text, start) > 0:
-            return True
-        previous_char = self._previous_non_whitespace_char(text, start)
-        next_char = self._next_non_whitespace_char(text, end)
-        return previous_char in {"[", ","} or next_char in {"]", ","}
-
-    def _array_depth_before(self, text: str, index: int) -> int:
-        depth = 0
-        in_string = False
-        escaped = False
-        for char in text[:index]:
-            if in_string:
-                if escaped:
-                    escaped = False
-                elif char == "\\":
-                    escaped = True
-                elif char == '"':
-                    in_string = False
-                continue
-            if char == '"':
-                in_string = True
-            elif char == "[":
-                depth += 1
-            elif char == "]" and depth:
-                depth -= 1
-        return depth
-
-    def _next_non_whitespace_char(self, text: str, index: int) -> str:
-        for char in text[index:]:
-            if not char.isspace():
-                return char
-        return ""
-
-    def _previous_non_whitespace_char(self, text: str, index: int) -> str:
-        for char in reversed(text[:index]):
-            if not char.isspace():
-                return char
-        return ""
 
     def extract(self, title: str, url: str, source: str, publish_date: str, summary: str, detail_text: str) -> dict:
         if not hasattr(requests, "post"):

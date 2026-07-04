@@ -64,20 +64,38 @@ class AIExtractor:
             raise ValueError("AI response text is missing")
         if not text.strip():
             raise ValueError("AI response text is missing")
-        cleaned = self._extract_json_object_text(text)
+        cleaned = self._extract_fenced_json_text(text)
         try:
             data = json.loads(cleaned)
         except json.JSONDecodeError as exc:
-            raise ValueError("AI response is not valid JSON") from exc
+            if self._starts_with_json_array_or_scalar(cleaned):
+                raise ValueError("AI response is not valid JSON") from exc
+            cleaned = self._extract_json_object_text(cleaned)
+            try:
+                data = json.loads(cleaned)
+            except json.JSONDecodeError as fallback_exc:
+                raise ValueError("AI response is not valid JSON") from fallback_exc
         if not isinstance(data, dict):
             raise ValueError("AI response JSON must be an object")
         return data
 
-    def _extract_json_object_text(self, text: str) -> str:
+    def _extract_fenced_json_text(self, text: str) -> str:
         cleaned = text.strip()
         fenced = re.search(r"```(?:json)?\s*(.*?)\s*```", cleaned, flags=re.IGNORECASE | re.DOTALL)
         if fenced:
             return fenced.group(1).strip()
+        return cleaned
+
+    def _starts_with_json_array_or_scalar(self, text: str) -> bool:
+        stripped = text.lstrip()
+        return (
+            stripped.startswith("[")
+            or stripped.startswith(('"', "-", "true", "false", "null"))
+            or stripped[:1].isdigit()
+        )
+
+    def _extract_json_object_text(self, text: str) -> str:
+        cleaned = self._extract_fenced_json_text(text)
         if "{" in cleaned and "}" in cleaned:
             return cleaned[cleaned.find("{"):cleaned.rfind("}") + 1].strip()
         return cleaned

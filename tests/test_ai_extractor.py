@@ -63,6 +63,12 @@ class AIExtractorTests(unittest.TestCase):
 
         self.assertEqual(data["region"], "上海")
 
+    def test_parse_json_text_rejects_top_level_array_as_non_object(self):
+        for text in ('[{"region":"上海","deadlines":[]}]', "[1, 2]"):
+            with self.subTest(text=text):
+                with self.assertRaisesRegex(ValueError, "AI response JSON must be an object"):
+                    AIExtractor({})._parse_json_text(text)
+
     def test_parse_json_text_rejects_empty_response_as_missing(self):
         for text in ("", "   \n\t"):
             with self.subTest(text=repr(text)):
@@ -181,7 +187,7 @@ class AIExtractorTests(unittest.TestCase):
         response.json.return_value = {"output_text": "not json"}
 
         with patch("src.results.ai_extractor.requests.post", return_value=response):
-            with self.assertRaises(ValueError):
+            with self.assertRaisesRegex(ValueError, "AI response is not valid JSON"):
                 AIExtractor(config).extract("标题", "https://e.test", "源", "2026-07-01", "摘要", "详情")
 
     def test_extract_rejects_missing_output_text_as_missing(self):

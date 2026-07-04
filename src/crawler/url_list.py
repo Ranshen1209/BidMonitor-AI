@@ -1657,13 +1657,14 @@ class UrlListCrawler(BaseCrawler):
 
         handling = "public_crawl"
         reason = "公开页面，按 URL 清单通用规则抓取公告链接或详情"
+        is_login_route = self._is_login_route(path, query, fragment)
         if host_key in {"biaoshu.xiaoxiaoai.cn", "xiquebiaoshu.com"}:
             handling = "low_value_reference"
             reason = "AI 标书工具页面，不是公告源；仅记录为低价值参考并尝试公开链接 fallback"
         elif host_key in {"wenshu.court.gov.cn"}:
             handling = "low_value_reference"
             reason = "裁判文书站点不是招投标公告源，作为低价值参考处理"
-        elif host_key in {"sd-portygzc.com", "cooperation.ceic.com", "sxtsrm.sngbs.com.cn"} or "login" in path or "sso" in path:
+        elif host_key in {"sd-portygzc.com", "cooperation.ceic.com", "sxtsrm.sngbs.com.cn"} or is_login_route:
             handling = "requires_login"
             reason = "登录/SSO 页面，需要账号授权；不绕过登录或验证码"
         elif host_key in {"tianyancha.com", "rccchina.com"}:
@@ -1682,7 +1683,7 @@ class UrlListCrawler(BaseCrawler):
         elif topology and self._topology_requires_strict_detail_urls(topology):
             if self._is_api_url(path, query):
                 page_type = "api"
-            elif self._is_login_url(path, query) or self._is_login_url(path, fragment):
+            elif is_login_route:
                 page_type = "login"
             elif self._is_search_url(path, query, fragment):
                 page_type = "search"
@@ -1694,7 +1695,7 @@ class UrlListCrawler(BaseCrawler):
                 page_type = "home"
         elif self._is_api_url(path, query):
             page_type = "api"
-        elif self._is_login_url(path, query) or self._is_login_url(path, fragment):
+        elif is_login_route:
             page_type = "login"
         elif self._is_detail_url(path, query):
             page_type = "detail"
@@ -1750,6 +1751,15 @@ class UrlListCrawler(BaseCrawler):
     def _is_login_url(self, path: str, query: str) -> bool:
         login_terms = ["login", "memberlogin", "sso", "login_bidder", "default/login"]
         return any(term in path for term in login_terms) or "response_type=code" in query
+
+    def _is_login_route(self, path: str, query: str, fragment: str) -> bool:
+        login_terms = ["login", "memberlogin", "sso", "login_bidder", "default/login"]
+        return (
+            any(term in path for term in login_terms)
+            or any(term in fragment for term in login_terms)
+            or "response_type=code" in query
+            or "response_type=code" in fragment
+        )
 
     def _is_detail_url(self, path: str, query: str) -> bool:
         filename = os.path.basename(path.rstrip("/"))

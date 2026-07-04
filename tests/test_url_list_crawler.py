@@ -98,6 +98,65 @@ class UrlListCrawlerTests(unittest.TestCase):
 
         self.assertEqual(crawler._classify_url("https://unknown.example.com/news-1.html")["page_type"], "detail")
 
+    def test_hash_fragment_login_url_classifies_as_login_and_requires_login_on_topology_host(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            urls_path = os.path.join(tmpdir, "urls.txt")
+            with open(urls_path, "w", encoding="utf-8") as f:
+                f.write("https://portal.example.com/\n")
+            topology_path = self.write_topologies(
+                tmpdir,
+                [
+                    {
+                        "id": "portal-test",
+                        "name": "Portal Test",
+                        "entry_url": "https://portal.example.com/",
+                        "allowed_hosts": ["portal.example.com"],
+                        "detail_url_regex": [r"/detail/\d+$"],
+                    }
+                ],
+            )
+            crawler = self.make_crawler_with_source_config(
+                urls_path,
+                None,
+                {},
+                config={"site_topologies_path": topology_path},
+            )
+
+            rule = crawler._classify_url("https://portal.example.com/#/login")
+
+            self.assertEqual(rule["page_type"], "login")
+            self.assertEqual(rule["handling"], "requires_login")
+
+    def test_topology_strict_detail_urls_false_allows_generic_detail_fallback(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            urls_path = os.path.join(tmpdir, "urls.txt")
+            with open(urls_path, "w", encoding="utf-8") as f:
+                f.write("https://portal.example.com/\n")
+            topology_path = self.write_topologies(
+                tmpdir,
+                [
+                    {
+                        "id": "portal-test",
+                        "name": "Portal Test",
+                        "entry_url": "https://portal.example.com/",
+                        "allowed_hosts": ["portal.example.com"],
+                        "detail_url_regex": [r"/detail/\d+$"],
+                        "strict_detail_urls": False,
+                    }
+                ],
+            )
+            crawler = self.make_crawler_with_source_config(
+                urls_path,
+                None,
+                {},
+                config={"site_topologies_path": topology_path},
+            )
+
+            self.assertEqual(
+                crawler._classify_url("https://portal.example.com/news-1.html")["page_type"],
+                "detail",
+            )
+
     def test_txt_url_list_reading_deduplicates_and_skips_invalid_values(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = os.path.join(tmpdir, "urls.txt")

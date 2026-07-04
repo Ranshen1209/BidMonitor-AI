@@ -77,6 +77,31 @@ class MonitorCoreAIExtractionTests(unittest.TestCase):
     @patch("src.monitor_core.Storage")
     @patch("src.monitor_core.get_all_crawlers", return_value={})
     @patch("src.monitor_core.get_default_sites", return_value={})
+    def test_non_matching_ai_rejected_bid_does_not_trigger_detail_enrichment_when_gated(self, _sites, _classes, storage_cls):
+        storage = Mock(spec=Storage)
+        storage.exists.return_value = False
+        storage.save.return_value = 123
+        storage_cls.return_value = storage
+        monitor = MonitorCore(
+            keywords=["智能化"],
+            crawler_overrides={
+                "enabled_sites": [],
+                "enrich_only_candidate_results": True,
+            },
+            ai_config={"enable": False},
+        )
+        monitor.crawlers = [NonMatchingFakeCrawler()]
+        monitor.ai_guard = Mock()
+        monitor.ai_guard.check_relevance.return_value = (False, "办公耗材不相关")
+
+        with patch("src.monitor_core.enrich_new_bid") as enrich:
+            monitor.run_once()
+
+        enrich.assert_not_called()
+
+    @patch("src.monitor_core.Storage")
+    @patch("src.monitor_core.get_all_crawlers", return_value={})
+    @patch("src.monitor_core.get_default_sites", return_value={})
     def test_ai_rejection_marks_review_but_does_not_block_storage(self, _sites, _classes, storage_cls):
         storage = Mock(spec=Storage)
         storage.exists.return_value = False

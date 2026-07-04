@@ -173,6 +173,7 @@ class MonitorCore:
             'site_topologies_path',
             'enable_legacy_builtin_crawlers',
             'notification_policy',
+            'enrich_only_candidate_results',
         ]:
             if key in self.crawler_overrides:
                 crawler_config[key] = self.crawler_overrides[key]
@@ -460,14 +461,6 @@ class MonitorCore:
                                 )
                             all_saved_bids.append(bid)
                             saved_count += 1
-                            enrich_new_bid(
-                                self.storage,
-                                result_id,
-                                bid,
-                                self.ai_config_for_extraction,
-                                log_callback=self.log,
-                                fetch_config=self.config.get('crawler', {}),
-                            )
                     elif bid.crawl_run_id:
                         self.storage.increment_crawl_run_counts(
                             bid.crawl_run_id,
@@ -492,6 +485,19 @@ class MonitorCore:
                                 "review_notes": f"AI初判: {ai_reason}",
                             }
                             self.storage.update_review([result_id], review_update)
+
+                    should_enrich = bool(result_id)
+                    if self.config.get('crawler', {}).get('enrich_only_candidate_results', False):
+                        should_enrich = bool(result_id and (result.matched or (ai_checked and ai_relevant)))
+                    if should_enrich:
+                        enrich_new_bid(
+                            self.storage,
+                            result_id,
+                            bid,
+                            self.ai_config_for_extraction,
+                            log_callback=self.log,
+                            fetch_config=self.config.get('crawler', {}),
+                        )
 
                     should_notify = self._should_notify_bid(result.matched, ai_relevant, ai_reason, ai_checked=ai_checked)
                     if result_id and not should_notify:

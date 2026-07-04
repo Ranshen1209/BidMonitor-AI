@@ -63,11 +63,24 @@ class AIExtractorTests(unittest.TestCase):
 
         self.assertEqual(data["region"], "上海")
 
+    def test_parse_json_text_extracts_object_from_numbered_wrapped_response(self):
+        text = "1. Result:\n{\"region\":\"上海\",\"deadlines\":[]}"
+
+        data = AIExtractor({})._parse_json_text(text)
+
+        self.assertEqual(data["region"], "上海")
+
     def test_parse_json_text_rejects_top_level_array_as_non_object(self):
         for text in ('[{"region":"上海","deadlines":[]}]', "[1, 2]"):
             with self.subTest(text=text):
                 with self.assertRaisesRegex(ValueError, "AI response JSON must be an object"):
                     AIExtractor({})._parse_json_text(text)
+
+    def test_parse_json_text_rejects_prose_wrapped_top_level_array_as_non_object(self):
+        text = "Here is result:\n[{\"region\":\"上海\",\"deadlines\":[]}]"
+
+        with self.assertRaisesRegex(ValueError, "AI response JSON must be an object"):
+            AIExtractor({})._parse_json_text(text)
 
     def test_parse_json_text_rejects_empty_response_as_missing(self):
         for text in ("", "   \n\t"):

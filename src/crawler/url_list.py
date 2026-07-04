@@ -966,6 +966,14 @@ class UrlListCrawler(BaseCrawler):
                 best_score = score
         return best if best_score > 0 else None
 
+    def _topology_requires_strict_detail_urls(self, topology: Optional[Dict[str, Any]]) -> bool:
+        if not topology:
+            return False
+        strict_value = topology.get("strict_detail_urls")
+        if strict_value is not None:
+            return bool(strict_value)
+        return bool(topology.get("detail_url_regex"))
+
     def _topology_allowed_hosts(self, topology: Dict[str, Any]) -> List[str]:
         hosts = [str(host).lower() for host in topology.get("allowed_hosts", []) if host]
         for key in ("entry_url", "url"):
@@ -1671,9 +1679,22 @@ class UrlListCrawler(BaseCrawler):
         topology_page_type = self._classify_url_by_topology(url, topology)
         if topology_page_type:
             page_type = topology_page_type
+        elif topology and self._topology_requires_strict_detail_urls(topology):
+            if self._is_api_url(path, query):
+                page_type = "api"
+            elif self._is_login_url(path, query) or self._is_login_url(path, fragment):
+                page_type = "login"
+            elif self._is_search_url(path, query, fragment):
+                page_type = "search"
+            elif self._is_list_url(path):
+                page_type = "list"
+            elif path in ("", "/") or path.endswith("/index.html"):
+                page_type = "home"
+            else:
+                page_type = "home"
         elif self._is_api_url(path, query):
             page_type = "api"
-        elif self._is_login_url(path, query):
+        elif self._is_login_url(path, query) or self._is_login_url(path, fragment):
             page_type = "login"
         elif self._is_detail_url(path, query):
             page_type = "detail"

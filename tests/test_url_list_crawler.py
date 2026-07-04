@@ -59,6 +59,45 @@ class UrlListCrawlerTests(unittest.TestCase):
             f.write(json.dumps({"version": 1, "sites": sites}, ensure_ascii=False))
         return path
 
+    def test_topology_detail_regex_blocks_generic_html_fallback_on_same_topology_host(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            urls_path = os.path.join(tmpdir, "urls.txt")
+            with open(urls_path, "w", encoding="utf-8") as f:
+                f.write("https://www.bidchance.test/\n")
+            topology_path = self.write_topologies(
+                tmpdir,
+                [
+                    {
+                        "id": "bidchance-test",
+                        "name": "招标网测试",
+                        "entry_url": "https://www.bidchance.test/",
+                        "allowed_hosts": ["www.bidchance.test", "chance.bidchance.test"],
+                        "detail_url_regex": [r"^https://www\.bidchance\.test/info-gonggao-[A-Za-z0-9]+\.html$"],
+                        "list_url_regex": [r"/outlinegonggao\.html$"],
+                    }
+                ],
+            )
+            crawler = self.make_crawler_with_source_config(
+                urls_path,
+                None,
+                {},
+                config={"site_topologies_path": topology_path},
+            )
+
+            self.assertEqual(
+                crawler._classify_url("https://www.bidchance.test/info-gonggao-ABC.html")["page_type"],
+                "detail",
+            )
+            self.assertNotEqual(
+                crawler._classify_url("https://chance.bidchance.test/company-123.html")["page_type"],
+                "detail",
+            )
+
+    def test_topology_strict_mode_keeps_unknown_external_hosts_generic(self):
+        crawler = self.make_crawler_with_source_config("/tmp/missing.txt", None, {})
+
+        self.assertEqual(crawler._classify_url("https://unknown.example.com/news-1.html")["page_type"], "detail")
+
     def test_txt_url_list_reading_deduplicates_and_skips_invalid_values(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = os.path.join(tmpdir, "urls.txt")
@@ -1742,10 +1781,14 @@ class UrlListCrawlerTests(unittest.TestCase):
 
     @patch.object(UrlListCrawler, "_request_url")
     def test_user_login_header_does_not_mark_public_portal_as_blocked(self, mock_request_url):
+        detail_url = (
+            "https://www.sdicc.com.cn/cgxx/ggDetail?"
+            "gcGuid=da97f2f1-64ca-4222-9d50-b976b16dbd2b&ggGuid=76cdd52c-8d91-4901-9a83-d28475fc5a6d"
+        )
         mock_request_url.return_value = (
             "<html><head><title>国投集团电子采购平台</title></head><body>"
             "<header><a href='/login'><span>用户登录</span></a></header>"
-            "<main><a href='/notice/1.html'>智能化工程招标公告</a><span>2026-07-01</span></main>"
+            f"<main><a href='{detail_url}'>智能化工程招标公告</a><span>2026-07-01</span></main>"
             "</body></html>",
             200,
             "OK",

@@ -138,6 +138,27 @@ class AIGuardTests(unittest.TestCase):
         self.assertFalse(relevant)
         self.assertIn("AI结果未知", reason)
 
+    def test_non_json_negated_positive_words_return_not_relevant(self):
+        config = {
+            "enable": True,
+            "base_url": "https://api.example.com/v1",
+            "api_key": "secret",
+            "model": "grok-4.20-fast",
+            "endpoint_type": "chat_completions",
+        }
+
+        for ai_content in ["不值得跟进：不是招标公告", "不太符合业务方向", "没有必要跟进"]:
+            with self.subTest(ai_content=ai_content):
+                response = Mock()
+                response.status_code = 200
+                response.json.return_value = {"choices": [{"message": {"content": ai_content}}]}
+
+                with patch("requests.post", return_value=response):
+                    relevant, reason = AIGuard(config).check_relevance("行业新闻", "智慧楼宇趋势")
+
+                self.assertFalse(relevant)
+                self.assertEqual(reason, ai_content)
+
     def test_clear_positive_non_json_response_returns_relevant(self):
         config = {
             "enable": True,
@@ -147,7 +168,14 @@ class AIGuardTests(unittest.TestCase):
             "endpoint_type": "chat_completions",
         }
 
-        for ai_content in ["相关", "是相关", "该项目相关", "相关：明确是视频监控采购公告"]:
+        for ai_content in [
+            "相关",
+            "是相关",
+            "该项目相关",
+            "相关：明确是视频监控采购公告",
+            "值得跟进",
+            "符合业务方向",
+        ]:
             with self.subTest(ai_content=ai_content):
                 response = Mock()
                 response.status_code = 200
@@ -157,7 +185,7 @@ class AIGuardTests(unittest.TestCase):
                     relevant, reason = AIGuard(config).check_relevance("视频监控采购公告", "公开招标")
 
                 self.assertTrue(relevant)
-                self.assertIn("相关", reason)
+                self.assertEqual(reason, ai_content)
 
     def test_network_error_returns_unknown_when_ai_enabled(self):
         config = {

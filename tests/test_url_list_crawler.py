@@ -121,6 +121,8 @@ class UrlListCrawlerTests(unittest.TestCase):
             "https://www.chinabidding.com/other/123-News.html",
             "https://www.plap.mil.cn/freecms/site/juncai/dishonesty.html",
             "https://www.plap.mil.cn/anything/warning.html?id=1",
+            "https://www.plap.mil.cn/freecms/site/juncai/nested/warning.html?id=1",
+            "https://www.plap.mil.cn/freecms/site/juncai/extra/dishonesty.html?id=1",
             "https://chance.bidchance.com/company/123.html",
         ]
 
@@ -134,6 +136,12 @@ class UrlListCrawlerTests(unittest.TestCase):
         )
         self.assertNotEqual(
             crawler._classify_url("https://www.plap.mil.cn/anything/warning.html?id=1")["handling"],
+            "non_announcement",
+        )
+        self.assertNotEqual(
+            crawler._classify_url(
+                "https://www.plap.mil.cn/freecms/site/juncai/nested/warning.html?id=1"
+            )["handling"],
             "non_announcement",
         )
 

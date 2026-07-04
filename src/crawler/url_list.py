@@ -1495,10 +1495,12 @@ class UrlListCrawler(BaseCrawler):
             return re.fullmatch(r"/infodetail/[^/]+-news\.html", path) is not None
 
         if self._host_matches_domain(host, "plap.mil.cn"):
-            if not path.startswith("/freecms/site/juncai/"):
-                return False
-            filename = path.rsplit("/", 1)[-1]
-            if filename not in {"dishonesty.html", "suspended.html", "warning.html"}:
+            penalty_paths = {
+                "/freecms/site/juncai/dishonesty.html",
+                "/freecms/site/juncai/suspended.html",
+                "/freecms/site/juncai/warning.html",
+            }
+            if path not in penalty_paths:
                 return False
             return any(key.lower() == "id" for key, _ in parse_qsl(parsed.query, keep_blank_values=True))
 

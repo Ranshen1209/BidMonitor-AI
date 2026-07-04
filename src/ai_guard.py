@@ -99,7 +99,11 @@ class AIGuard:
         if isinstance(value, bool):
             return value
         if isinstance(value, (int, float)):
-            return bool(value)
+            if value == 0:
+                return False
+            if value == 1:
+                return True
+            return None
         if isinstance(value, str):
             normalized = value.strip().lower()
             negative_values = {"false", "no", "n", "0", "否", "不", "不相关", "无关", "不符合", "非相关"}

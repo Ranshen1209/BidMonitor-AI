@@ -136,6 +136,39 @@ class AIGuardTests(unittest.TestCase):
         self.assertIn("AI结果未知", reason)
         self.assertIn("无法判断", reason)
 
+    def test_ambiguous_json_numeric_relevant_returns_unknown_reason(self):
+        config = {
+            "enable": True,
+            "base_url": "https://api.example.com/v1",
+            "api_key": "secret",
+            "model": "grok-4.20-fast",
+            "endpoint_type": "chat_completions",
+        }
+
+        for raw_relevant in [2, -1]:
+            with self.subTest(raw_relevant=raw_relevant):
+                response = Mock()
+                response.status_code = 200
+                response.json.return_value = {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": json.dumps(
+                                    {"relevant": raw_relevant, "reason": "无法判断"},
+                                    ensure_ascii=False,
+                                )
+                            }
+                        }
+                    ]
+                }
+
+                with patch("requests.post", return_value=response):
+                    relevant, reason = AIGuard(config).check_relevance("平台首页", "欢迎访问")
+
+                self.assertFalse(relevant)
+                self.assertIn("AI结果未知", reason)
+                self.assertIn("无法判断", reason)
+
     def test_json_missing_relevant_returns_unknown_reason(self):
         response = Mock()
         response.status_code = 200

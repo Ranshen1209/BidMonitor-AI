@@ -62,10 +62,7 @@ class AIExtractor:
     def _parse_json_text(self, text: str) -> dict:
         if not isinstance(text, str):
             raise ValueError("AI response text is missing")
-        cleaned = text.strip()
-        fenced = re.match(r"^```(?:json)?\s*(.*?)\s*```$", cleaned, flags=re.DOTALL)
-        if fenced:
-            cleaned = fenced.group(1).strip()
+        cleaned = self._extract_json_object_text(text)
         try:
             data = json.loads(cleaned)
         except json.JSONDecodeError as exc:
@@ -73,6 +70,15 @@ class AIExtractor:
         if not isinstance(data, dict):
             raise ValueError("AI response JSON must be an object")
         return data
+
+    def _extract_json_object_text(self, text: str) -> str:
+        cleaned = text.strip()
+        fenced = re.search(r"```(?:json)?\s*(.*?)\s*```", cleaned, flags=re.IGNORECASE | re.DOTALL)
+        if fenced:
+            return fenced.group(1).strip()
+        if "{" in cleaned and "}" in cleaned:
+            return cleaned[cleaned.find("{"):cleaned.rfind("}") + 1].strip()
+        return cleaned
 
     def extract(self, title: str, url: str, source: str, publish_date: str, summary: str, detail_text: str) -> dict:
         if not hasattr(requests, "post"):
@@ -142,6 +148,17 @@ class AIExtractor:
         return str(text).strip()
 
 
+def _iter_deadline_dicts(ai_data: dict):
+    deadlines = (ai_data or {}).get("deadlines") or []
+    if isinstance(deadlines, dict):
+        deadlines = [deadlines]
+    if not isinstance(deadlines, list):
+        return
+    for deadline in deadlines:
+        if isinstance(deadline, dict):
+            yield deadline
+
+
 def build_column_updates(ai_data: dict) -> dict:
     columns = {}
     for key in ["amount", "amount_unit", "region", "category", "project_type", "nature", "ai_recommendation"]:
@@ -153,9 +170,8 @@ def build_column_updates(ai_data: dict) -> dict:
                 value = str(value)
             columns[key] = value
 
-    deadlines = (ai_data or {}).get("deadlines") or []
     used_deadlines = False
-    for deadline in deadlines:
+    for deadline in _iter_deadline_dicts(ai_data):
         deadline_type = deadline.get("type")
         mapping = DEADLINE_COLUMN_MAP.get(deadline_type)
         if not mapping:
@@ -183,7 +199,7 @@ def _parse_deadline_value(value: str) -> datetime | None:
 
 def suggest_urgency(ai_data: dict, now: datetime | None = None) -> dict:
     now = now or datetime.now()
-    deadlines = (ai_data or {}).get("deadlines") or []
+    deadlines = list(_iter_deadline_dicts(ai_data))
     priority = ["submission_deadline", "registration_deadline", "bid_opening_time"]
 
     chosen_type = None

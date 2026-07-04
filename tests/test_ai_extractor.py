@@ -56,6 +56,13 @@ class AIExtractorTests(unittest.TestCase):
         self.assertIn("messages", post.call_args.kwargs["json"])
         self.assertIs(post.call_args.kwargs["json"]["stream"], False)
 
+    def test_parse_json_text_extracts_object_from_wrapped_response(self):
+        text = "以下是提取结果：\n{\"region\":\"上海\",\"deadlines\":[]}\n请查收"
+
+        data = AIExtractor({})._parse_json_text(text)
+
+        self.assertEqual(data["region"], "上海")
+
     def test_test_connection_uses_responses_endpoint(self):
         config = {
             "enable": True,
@@ -144,6 +151,22 @@ class AIExtractorTests(unittest.TestCase):
         self.assertEqual(suggestion["urgency"], "urgent")
         self.assertEqual(suggestion["urgency_source"], "auto")
         self.assertEqual(suggestion["urgency_reference_type"], "submission")
+
+    def test_deadline_helpers_ignore_non_dict_deadline_items(self):
+        data = {
+            "region": "上海",
+            "deadlines": [
+                "2026-07-04 10:00",
+                {"type": "submission_deadline", "end_at": "2026-07-05 10:00"},
+            ],
+        }
+
+        columns = build_column_updates(data)
+        urgency = suggest_urgency(data, now=datetime(2026, 7, 2, 9, 0))
+
+        self.assertEqual(columns["submission_deadline"], "2026-07-05 10:00")
+        self.assertEqual(columns["deadline_source"], "ai")
+        self.assertEqual(urgency["urgency_reference_type"], "submission")
 
     def test_invalid_json_raises_value_error(self):
         config = {"enable": True, "base_url": "https://api.example.com/v1", "api_key": "secret", "model": "grok", "endpoint_type": "responses"}

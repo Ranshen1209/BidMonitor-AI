@@ -120,6 +120,7 @@ class UrlListCrawlerTests(unittest.TestCase):
             "https://notbidchance.com/company-123.html",
             "https://www.chinabidding.com/other/123-News.html",
             "https://www.plap.mil.cn/freecms/site/juncai/dishonesty.html",
+            "https://www.plap.mil.cn/anything/warning.html?id=1",
             "https://chance.bidchance.com/company/123.html",
         ]
 
@@ -131,9 +132,17 @@ class UrlListCrawlerTests(unittest.TestCase):
             crawler._classify_url("https://notchinabidding.com/infoDetail/123-News.html")["handling"],
             "non_announcement",
         )
+        self.assertNotEqual(
+            crawler._classify_url("https://www.plap.mil.cn/anything/warning.html?id=1")["handling"],
+            "non_announcement",
+        )
 
     def test_rejects_platform_shell_title_without_structured_fields(self):
         crawler = self.make_crawler_with_source_config("/tmp/missing.txt", None, {})
+        detail_url = (
+            "https://www.sdicc.com.cn/cgxx/ggDetail?"
+            "gcGuid=da97f2f1-64ca-4222-9d50-b976b16dbd2b&ggGuid=76cdd52c-8d91-4901-9a83-d28475fc5a6d"
+        )
         bid = type(
             "Bid",
             (),
@@ -143,10 +152,34 @@ class UrlListCrawlerTests(unittest.TestCase):
             },
         )()
 
+        self.assertEqual(crawler._classify_url(detail_url)["page_type"], "detail")
         self.assertFalse(
             crawler._is_admissible_detail_bid(
                 bid,
-                "https://www.sdicc.com.cn/cgxx/ggDetail?gcGuid=gc&ggGuid=gg",
+                detail_url,
+            )
+        )
+
+    def test_platform_shell_title_with_structured_fields_is_admissible_detail(self):
+        crawler = self.make_crawler_with_source_config("/tmp/missing.txt", None, {})
+        detail_url = (
+            "https://www.sdicc.com.cn/cgxx/ggDetail?"
+            "gcGuid=da97f2f1-64ca-4222-9d50-b976b16dbd2b&ggGuid=76cdd52c-8d91-4901-9a83-d28475fc5a6d"
+        )
+        bid = type(
+            "Bid",
+            (),
+            {
+                "title": "国投集团电子采购平台",
+                "content": "发布时间：2026-07-02 采购单位：上海测试单位 招标公告 项目 服务",
+            },
+        )()
+
+        self.assertEqual(crawler._classify_url(detail_url)["page_type"], "detail")
+        self.assertTrue(
+            crawler._is_admissible_detail_bid(
+                bid,
+                detail_url,
             )
         )
 

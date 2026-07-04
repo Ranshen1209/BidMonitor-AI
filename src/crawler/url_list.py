@@ -1495,6 +1495,8 @@ class UrlListCrawler(BaseCrawler):
             return re.fullmatch(r"/infodetail/[^/]+-news\.html", path) is not None
 
         if self._host_matches_domain(host, "plap.mil.cn"):
+            if not path.startswith("/freecms/site/juncai/"):
+                return False
             filename = path.rsplit("/", 1)[-1]
             if filename not in {"dishonesty.html", "suspended.html", "warning.html"}:
                 return False
@@ -1521,9 +1523,7 @@ class UrlListCrawler(BaseCrawler):
             return False
         if rule.get("page_type") != "detail":
             return False
-        if rule.get("page_type") == "detail":
-            return self._has_detail_evidence(text, allow_minimal=True)
-        return False
+        return self._has_detail_evidence(text, allow_minimal=True)
 
     def _should_use_candidate_title(self, current_title: str, candidate_title: str, page_url: str) -> bool:
         candidate_title = self._normalize_space(candidate_title)

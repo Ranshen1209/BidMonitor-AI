@@ -82,6 +82,87 @@ class AIGuardTests(unittest.TestCase):
         self.assertFalse(relevant)
         self.assertEqual(reason, "纯平台推广页")
 
+    def test_ambiguous_json_string_relevant_returns_unknown_reason(self):
+        response = Mock()
+        response.status_code = 200
+        response.json.return_value = {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps({"relevant": "maybe", "reason": "无法判断"}, ensure_ascii=False)
+                    }
+                }
+            ]
+        }
+        config = {
+            "enable": True,
+            "base_url": "https://api.example.com/v1",
+            "api_key": "secret",
+            "model": "grok-4.20-fast",
+            "endpoint_type": "chat_completions",
+        }
+
+        with patch("requests.post", return_value=response):
+            relevant, reason = AIGuard(config).check_relevance("平台首页", "欢迎访问")
+
+        self.assertFalse(relevant)
+        self.assertIn("AI结果未知", reason)
+        self.assertIn("无法判断", reason)
+
+    def test_json_null_relevant_returns_unknown_reason(self):
+        response = Mock()
+        response.status_code = 200
+        response.json.return_value = {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps({"relevant": None, "reason": "无法判断"}, ensure_ascii=False)
+                    }
+                }
+            ]
+        }
+        config = {
+            "enable": True,
+            "base_url": "https://api.example.com/v1",
+            "api_key": "secret",
+            "model": "grok-4.20-fast",
+            "endpoint_type": "chat_completions",
+        }
+
+        with patch("requests.post", return_value=response):
+            relevant, reason = AIGuard(config).check_relevance("平台首页", "欢迎访问")
+
+        self.assertFalse(relevant)
+        self.assertIn("AI结果未知", reason)
+        self.assertIn("无法判断", reason)
+
+    def test_json_missing_relevant_returns_unknown_reason(self):
+        response = Mock()
+        response.status_code = 200
+        response.json.return_value = {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps({"reason": "无法判断"}, ensure_ascii=False)
+                    }
+                }
+            ]
+        }
+        config = {
+            "enable": True,
+            "base_url": "https://api.example.com/v1",
+            "api_key": "secret",
+            "model": "grok-4.20-fast",
+            "endpoint_type": "chat_completions",
+        }
+
+        with patch("requests.post", return_value=response):
+            relevant, reason = AIGuard(config).check_relevance("平台首页", "欢迎访问")
+
+        self.assertFalse(relevant)
+        self.assertIn("AI结果未知", reason)
+        self.assertIn("无法判断", reason)
+
     def test_non_json_negative_text_checks_not_relevant_before_relevant(self):
         response = Mock()
         response.status_code = 200

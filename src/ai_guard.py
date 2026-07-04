@@ -108,7 +108,7 @@ class AIGuard:
                 return False
             if normalized in positive_values:
                 return True
-        return False
+        return None
 
     def _infer_relevance_from_text(self, ai_content):
         """Best-effort fallback for non-JSON model output, checking negative signals first."""
@@ -256,8 +256,15 @@ class AIGuard:
                     try:
                         json_str = self._extract_json_text(ai_content)
                         analysis = json.loads(json_str)
-                        is_relevant = self._coerce_relevant_value(analysis.get('relevant', False))
+                        raw_relevant = analysis.get('relevant') if 'relevant' in analysis else None
+                        is_relevant = self._coerce_relevant_value(raw_relevant)
                         reason = analysis.get('reason', 'AI未提供理由')
+
+                        if is_relevant is None:
+                            raw_context = '缺失' if 'relevant' not in analysis else repr(raw_relevant)
+                            unknown_reason = f"AI结果未知: relevant={raw_context}; reason={reason}; response={ai_content[:60]}"
+                            self.log(f"⚠️ [AI判定] 未知 - {unknown_reason[:80]}")
+                            return False, unknown_reason
                         
                         if is_relevant:
                             self.log(f"✅ [AI判定] 相关 - {reason}")

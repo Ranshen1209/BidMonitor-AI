@@ -82,11 +82,23 @@ class AIExtractorTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "AI response JSON must be an object"):
             AIExtractor({})._parse_json_text(text)
 
+    def test_parse_json_text_rejects_prose_wrapped_scalar_array_as_non_object(self):
+        text = "Here is result:\n[1, 2]"
+
+        with self.assertRaisesRegex(ValueError, "AI response JSON must be an object"):
+            AIExtractor({})._parse_json_text(text)
+
     def test_parse_json_text_rejects_empty_response_as_missing(self):
         for text in ("", "   \n\t"):
             with self.subTest(text=repr(text)):
                 with self.assertRaisesRegex(ValueError, "AI response text is missing"):
                     AIExtractor({})._parse_json_text(text)
+
+    def test_parse_json_text_does_not_extract_inner_object_from_invalid_json_object(self):
+        text = "{\"outer\": {\"inner\": 1}"
+
+        with self.assertRaisesRegex(ValueError, "AI response is not valid JSON"):
+            AIExtractor({})._parse_json_text(text)
 
     def test_test_connection_uses_responses_endpoint(self):
         config = {

@@ -479,7 +479,7 @@ class MonitorCore:
                     ai_checked = False
                     if self.ai_guard:
                         ai_relevant, ai_reason = self.ai_guard.check_relevance(bid.title, bid.content or "")
-                        ai_checked = True
+                        ai_checked = not str(ai_reason or "").startswith(("AI未启用", "AI未配置Key"))
                         ai_bucket = ai_stats['ai_approved'] if ai_relevant else ai_stats['ai_rejected']
                         ai_bucket.append({
                             'title': bid.title,

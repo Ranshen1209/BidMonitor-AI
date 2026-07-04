@@ -139,9 +139,6 @@ class AIGuardTests(unittest.TestCase):
         self.assertIn("AI结果未知", reason)
 
     def test_clear_positive_non_json_response_returns_relevant(self):
-        response = Mock()
-        response.status_code = 200
-        response.json.return_value = {"choices": [{"message": {"content": "相关：明确是视频监控采购公告"}}]}
         config = {
             "enable": True,
             "base_url": "https://api.example.com/v1",
@@ -150,11 +147,17 @@ class AIGuardTests(unittest.TestCase):
             "endpoint_type": "chat_completions",
         }
 
-        with patch("requests.post", return_value=response):
-            relevant, reason = AIGuard(config).check_relevance("视频监控采购公告", "公开招标")
+        for ai_content in ["相关", "是相关", "该项目相关", "相关：明确是视频监控采购公告"]:
+            with self.subTest(ai_content=ai_content):
+                response = Mock()
+                response.status_code = 200
+                response.json.return_value = {"choices": [{"message": {"content": ai_content}}]}
 
-        self.assertTrue(relevant)
-        self.assertIn("相关", reason)
+                with patch("requests.post", return_value=response):
+                    relevant, reason = AIGuard(config).check_relevance("视频监控采购公告", "公开招标")
+
+                self.assertTrue(relevant)
+                self.assertIn("相关", reason)
 
     def test_network_error_returns_unknown_when_ai_enabled(self):
         config = {

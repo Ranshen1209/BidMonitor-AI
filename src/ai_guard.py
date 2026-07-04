@@ -145,6 +145,9 @@ class AIGuard:
         positive_patterns = [
             r"\brelevant\s*[:：]\s*true\b",
             r"\btrue\b",
+            r"^相关$",
+            r"^是相关$",
+            r"该?项目相关",
             r"相关\s*[:：]",
             r"判定.*相关",
             r"符合",

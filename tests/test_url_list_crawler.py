@@ -191,6 +191,32 @@ class UrlListCrawlerTests(unittest.TestCase):
             )
         )
 
+    def test_minimal_detail_evidence_requires_structured_procurement_field(self):
+        crawler = self.make_crawler_with_source_config("/tmp/missing.txt", None, {})
+
+        self.assertFalse(
+            crawler._has_detail_evidence(
+                "上海安防工程招标公告 本项目采购安防监控系统服务",
+                allow_minimal=True,
+            )
+        )
+        self.assertTrue(
+            crawler._has_detail_evidence(
+                "上海安防工程招标公告 发布时间：2026-07-02 本项目采购安防监控系统服务",
+                allow_minimal=True,
+            )
+        )
+
+    def test_full_detail_evidence_still_accepts_two_structured_fields(self):
+        crawler = self.make_crawler_with_source_config("/tmp/missing.txt", None, {})
+
+        self.assertTrue(
+            crawler._has_detail_evidence(
+                "上海安防工程招标公告 发布时间：2026-07-02 采购单位：上海测试单位",
+                allow_minimal=False,
+            )
+        )
+
     def test_hash_fragment_login_url_classifies_as_login_and_requires_login_on_topology_host(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             urls_path = os.path.join(tmpdir, "urls.txt")
@@ -1113,7 +1139,8 @@ class UrlListCrawlerTests(unittest.TestCase):
             if url == "https://public.example.com/list":
                 return (
                     "<html><body><a href='/login'>请登录</a>"
-                    "<a href='/detail/1'>上海安防工程公开招标公告</a></body></html>",
+                    "<a href='/detail/1'>上海安防工程公开招标公告</a>"
+                    "<span>发布时间：2026-07-02</span></body></html>",
                     200,
                     "OK",
                 )
@@ -1850,7 +1877,8 @@ class UrlListCrawlerTests(unittest.TestCase):
     def test_accessible_html_generates_bid_info(self, mock_request_url):
         mock_request_url.return_value = (
             "<html><head><title>上海弱电智能化采购公告</title></head>"
-            "<body><h1>上海弱电智能化采购公告</h1><p>本项目包含安防、监控、门禁系统。</p></body></html>",
+            "<body><h1>上海弱电智能化采购公告</h1><p>发布时间：2026-07-02</p>"
+            "<p>本项目包含安防、监控、门禁系统。</p></body></html>",
             200,
             "OK",
         )
@@ -1880,7 +1908,8 @@ class UrlListCrawlerTests(unittest.TestCase):
             if url.endswith("/timeout"):
                 raise requests.exceptions.Timeout("slow")
             return (
-                "<html><body><h1>上海信息化公开招标</h1><p>综合布线项目。</p></body></html>",
+                "<html><body><h1>上海信息化公开招标</h1><p>发布时间：2026-07-02</p>"
+                "<p>综合布线项目。</p></body></html>",
                 200,
                 "OK",
             )
@@ -1925,7 +1954,10 @@ class UrlListCrawlerTests(unittest.TestCase):
 
     def test_cookie_header_is_applied_for_matching_domain_without_logging_secret(self):
         class FakeResponse:
-            text = "<html><body><h1>上海弱电公开招标公告</h1></body></html>"
+            text = (
+                "<html><body><h1>上海弱电公开招标公告</h1>"
+                "<p>发布时间：2026-07-02</p></body></html>"
+            )
             status_code = 200
             reason = "OK"
             apparent_encoding = "utf-8"
@@ -1992,7 +2024,8 @@ class UrlListCrawlerTests(unittest.TestCase):
         mock_request_url.return_value = (
             "<html><body>"
             "<nav><a href='/login'>登录</a><a href='/register'>注册</a></nav>"
-            "<ul><li><a href='/notice/1.html'>上海智能化公开招标公告</a><span>2026-07-01</span></li></ul>"
+            "<ul><li><a href='/notice/1.html'>上海智能化公开招标公告</a>"
+            "<span>发布时间：2026-07-01</span></li></ul>"
             "</body></html>",
             200,
             "OK",

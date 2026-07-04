@@ -1621,7 +1621,12 @@ class UrlListCrawler(BaseCrawler):
                 "综合布线",
             ]
         )
-        return stage_signal and subject_signal and len(text) >= 12
+        return (
+            stage_signal
+            and subject_signal
+            and self._has_structured_procurement_field(text)
+            and len(text) >= 12
+        )
 
     def _looks_like_navigation_page(self, text: str) -> bool:
         nav_terms = [

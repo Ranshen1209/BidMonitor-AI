@@ -127,6 +127,37 @@ class UrlListCrawlerTests(unittest.TestCase):
             self.assertEqual(rule["page_type"], "login")
             self.assertEqual(rule["handling"], "requires_login")
 
+    def test_hash_route_containing_sso_word_is_not_login(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            urls_path = os.path.join(tmpdir, "urls.txt")
+            with open(urls_path, "w", encoding="utf-8") as f:
+                f.write("https://portal.example.com/\n")
+            topology_path = self.write_topologies(
+                tmpdir,
+                [
+                    {
+                        "id": "portal-test",
+                        "name": "Portal Test",
+                        "entry_url": "https://portal.example.com/",
+                        "allowed_hosts": ["portal.example.com"],
+                        "detail_url_regex": [r"/detail/\d+$"],
+                    }
+                ],
+            )
+            crawler = self.make_crawler_with_source_config(
+                urls_path,
+                None,
+                {},
+                config={"site_topologies_path": topology_path},
+            )
+            route_url = "https://portal.example.com/#/association/notices"
+
+            rule = crawler._classify_url(route_url)
+
+            self.assertNotEqual(rule["page_type"], "login")
+            self.assertNotEqual(rule["handling"], "requires_login")
+            self.assertTrue(crawler._should_follow_candidate("https://portal.example.com/", route_url, 0))
+
     def test_topology_strict_detail_urls_false_allows_generic_detail_fallback(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             urls_path = os.path.join(tmpdir, "urls.txt")

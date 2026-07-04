@@ -1749,16 +1749,27 @@ class UrlListCrawler(BaseCrawler):
         return "/api/" in path or path.endswith(".json") or "format=json" in query
 
     def _is_login_url(self, path: str, query: str) -> bool:
-        login_terms = ["login", "memberlogin", "sso", "login_bidder", "default/login"]
-        return any(term in path for term in login_terms) or "response_type=code" in query
+        return self._matches_login_route(path) or "response_type=code" in query
 
     def _is_login_route(self, path: str, query: str, fragment: str) -> bool:
-        login_terms = ["login", "memberlogin", "sso", "login_bidder", "default/login"]
         return (
-            any(term in path for term in login_terms)
-            or any(term in fragment for term in login_terms)
+            self._matches_login_route(path)
+            or self._matches_login_route(fragment)
             or "response_type=code" in query
             or "response_type=code" in fragment
+        )
+
+    def _matches_login_route(self, route: str) -> bool:
+        normalized = route.lower().strip()
+        if not normalized:
+            return False
+        normalized = normalized.replace("\\", "/")
+        segments = [segment for segment in re.split(r"[/?#&=]+", normalized) if segment]
+        if any(segment in {"login", "signin", "auth", "sso", "login_bidder", "memberlogin"} for segment in segments):
+            return True
+        return any(
+            f"/{phrase}" in f"/{normalized}"
+            for phrase in ["user/login", "default/login"]
         )
 
     def _is_detail_url(self, path: str, query: str) -> bool:

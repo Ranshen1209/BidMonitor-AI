@@ -377,6 +377,8 @@ class UrlListCrawler(BaseCrawler):
         self._domain_failure_counts: Dict[str, int] = {}
         self._domain_circuit_open: set[str] = set()
         self._domain_failure_lock = threading.Lock()
+        self._topology_fetch_gates: Dict[str, threading.Lock] = {}
+        self._topology_fetch_gates_guard = threading.Lock()
         self._domain_locks: Dict[str, threading.Lock] = {}
         self._domain_locks_guard = threading.Lock()
         self._diagnostics_lock = threading.Lock()
@@ -750,59 +752,10 @@ class UrlListCrawler(BaseCrawler):
             )
 
             if prefetched_html is None:
-                browser_first = self._prefers_browser_fetch(page_url)
-                browser_result = self._request_url_with_browser(page_url) if browser_first else None
-                if browser_result:
-                    html, status_code, _status_text = browser_result
-                else:
-                    try:
-                        self._respect_rate_limit(page_url)
-                        html, status_code, _status_text = self._request_url(page_url)
-                    except Exception as exc:
-                        reason = f"{exc.__class__.__name__}: {exc}"
-                        if self._should_retry_browser_for_fetch_failure(page_url):
-                            browser_result = self._request_url_with_browser(page_url)
-                            if browser_result:
-                                html, status_code, _status_text = browser_result
-                            else:
-                                self.logger.debug(f"[{self.name}] topology browser fallback failed {page_url}: {exc}")
-                                self._record_topology_fetch_failure(page_url, reason, exc=exc)
-                                continue
-                        else:
-                            self.logger.debug(f"[{self.name}] topology fetch failed {page_url}: {exc}")
-                            self._record_topology_fetch_failure(page_url, reason, exc=exc)
-                            continue
-                if status_code >= 400 or self._contains_blocked_sign(html, page_url):
-                    failure_reason = self._topology_fetch_failure_reason(page_url, html, status_code, _status_text)
-                    if self._should_retry_browser_for_fetch_failure(page_url):
-                        browser_result = self._request_url_with_browser(page_url)
-                        if browser_result:
-                            html, status_code, _status_text = browser_result
-                            if status_code >= 400 or self._contains_blocked_sign(html, page_url):
-                                self._record_topology_fetch_failure(
-                                    page_url,
-                                    self._topology_fetch_failure_reason(page_url, html, status_code, _status_text),
-                                    status_code,
-                                    html=html,
-                                )
-                                continue
-                        else:
-                            self._record_topology_fetch_failure(
-                                page_url,
-                                failure_reason,
-                                status_code,
-                                html=html,
-                            )
-                            continue
-                    else:
-                        self._record_topology_fetch_failure(
-                            page_url,
-                            failure_reason,
-                            status_code,
-                            html=html,
-                        )
-                        continue
-                self._record_domain_fetch_success(page_url)
+                fetched = self._fetch_topology_page_with_domain_gate(page_url, timestamp, cookie_used)
+                if fetched is None:
+                    continue
+                html, status_code, _status_text = fetched
             else:
                 html = prefetched_html
 
@@ -873,6 +826,78 @@ class UrlListCrawler(BaseCrawler):
         if status_code >= 400:
             return f"HTTP {status_code}: {status_text or 'detail fetch failed'}"
         return self._blocked_reason(html, page_url)
+
+    def _fetch_topology_page_with_domain_gate(
+        self,
+        page_url: str,
+        timestamp: str,
+        cookie_used: bool,
+    ) -> Optional[Tuple[str, int, str]]:
+        with self._topology_fetch_gate(page_url):
+            if self._is_domain_circuit_open(page_url):
+                self._record_diagnostic(
+                    page_url,
+                    "failed",
+                    "domain circuit open after repeated fetch failures",
+                    timestamp,
+                    cookie_used=cookie_used,
+                    rule=self._classify_url(page_url),
+                )
+                return None
+            browser_first = self._prefers_browser_fetch(page_url)
+            browser_result = self._request_url_with_browser(page_url) if browser_first else None
+            if browser_result:
+                html, status_code, status_text = browser_result
+            else:
+                try:
+                    self._respect_rate_limit(page_url)
+                    html, status_code, status_text = self._request_url(page_url)
+                except Exception as exc:
+                    reason = f"{exc.__class__.__name__}: {exc}"
+                    if self._should_retry_browser_for_fetch_failure(page_url):
+                        browser_result = self._request_url_with_browser(page_url)
+                        if browser_result:
+                            html, status_code, status_text = browser_result
+                        else:
+                            self.logger.debug(f"[{self.name}] topology browser fallback failed {page_url}: {exc}")
+                            self._record_topology_fetch_failure(page_url, reason, exc=exc)
+                            return None
+                    else:
+                        self.logger.debug(f"[{self.name}] topology fetch failed {page_url}: {exc}")
+                        self._record_topology_fetch_failure(page_url, reason, exc=exc)
+                        return None
+            if status_code >= 400 or self._contains_blocked_sign(html, page_url):
+                failure_reason = self._topology_fetch_failure_reason(page_url, html, status_code, status_text)
+                if self._should_retry_browser_for_fetch_failure(page_url):
+                    browser_result = self._request_url_with_browser(page_url)
+                    if browser_result:
+                        html, status_code, status_text = browser_result
+                        if status_code >= 400 or self._contains_blocked_sign(html, page_url):
+                            self._record_topology_fetch_failure(
+                                page_url,
+                                self._topology_fetch_failure_reason(page_url, html, status_code, status_text),
+                                status_code,
+                                html=html,
+                            )
+                            return None
+                    else:
+                        self._record_topology_fetch_failure(
+                            page_url,
+                            failure_reason,
+                            status_code,
+                            html=html,
+                        )
+                        return None
+                else:
+                    self._record_topology_fetch_failure(
+                        page_url,
+                        failure_reason,
+                        status_code,
+                        html=html,
+                    )
+                    return None
+            self._record_domain_fetch_success(page_url)
+            return html, status_code, status_text
 
     def _record_topology_fetch_failure(
         self,
@@ -1197,12 +1222,26 @@ class UrlListCrawler(BaseCrawler):
         )
         if not blocked_failure:
             return
+        message = None
         with self._domain_failure_lock:
             count = self._domain_failure_counts.get(host, 0) + 1
             self._domain_failure_counts[host] = count
             if count >= self.domain_failure_threshold:
                 self._domain_circuit_open.add(host)
-                self._emit_info(f"[URL熔断] {self.name}: {host} 连续失败 {count} 次，本轮跳过后续同域请求")
+                message = f"[URL熔断] {self.name}: {host} 连续失败 {count} 次，本轮跳过后续同域请求"
+        if message:
+            self._emit_info(message)
+
+    def _topology_fetch_gate(self, url: str) -> threading.Lock:
+        host = self._domain_key(url)
+        if not host:
+            return threading.Lock()
+        with self._topology_fetch_gates_guard:
+            gate = self._topology_fetch_gates.get(host)
+            if gate is None:
+                gate = threading.Lock()
+                self._topology_fetch_gates[host] = gate
+            return gate
 
     def _domain_lock(self, host: str) -> threading.Lock:
         with self._domain_locks_guard:

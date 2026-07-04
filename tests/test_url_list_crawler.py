@@ -602,6 +602,120 @@ class UrlListCrawlerTests(unittest.TestCase):
         self.assertLessEqual(len(requested), 3)
         self.assertTrue(crawler._is_domain_circuit_open("blocked.example.com"))
 
+    @patch.object(UrlListCrawler, "_request_url")
+    def test_topology_circuit_breaker_serializes_concurrent_same_domain_failures(self, mock_request_url):
+        requested = []
+        requested_lock = threading.Lock()
+        entry_barrier = threading.Barrier(5)
+        seed_wave_ready = threading.Event()
+
+        def fake_request(url):
+            if url.startswith("https://blocked.example.com/entry-"):
+                entry_barrier.wait(timeout=2)
+                return ("entry down", 521, "Origin Down")
+            if "/list-" in url:
+                with requested_lock:
+                    requested.append(url)
+                    if len(requested) >= 5:
+                        seed_wave_ready.set()
+                seed_wave_ready.wait(timeout=0.2)
+                return ("blocked", 521, "Origin Down")
+            raise AssertionError(f"unexpected url {url}")
+
+        mock_request_url.side_effect = fake_request
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            urls_path = os.path.join(tmpdir, "urls.txt")
+            diagnostics_path = os.path.join(tmpdir, "diagnostics.jsonl")
+            with open(urls_path, "w", encoding="utf-8") as f:
+                for index in range(5):
+                    f.write(f"https://blocked.example.com/entry-{index}.html\n")
+            topology_path = self.write_topologies(
+                tmpdir,
+                [
+                    {
+                        "id": "blocked",
+                        "name": "Blocked Example",
+                        "entry_url": "https://blocked.example.com/",
+                        "allowed_hosts": ["blocked.example.com"],
+                        "seed_urls": ["https://blocked.example.com/list-1.html"],
+                        "list_url_regex": [r"/(?:entry-\d+|list-\d+)\.html$"],
+                    }
+                ],
+            )
+            crawler = self.make_crawler_with_source_config(
+                urls_path,
+                diagnostics_path,
+                {
+                    "concurrency": 5,
+                    "topology_max_depth": 1,
+                    "domain_failure_threshold": 2,
+                },
+                config={"site_topologies_path": topology_path},
+            )
+
+            bids = crawler.crawl()
+
+        self.assertEqual(bids, [])
+        self.assertLessEqual(len(requested), 2)
+        self.assertTrue(crawler._is_domain_circuit_open("blocked.example.com"))
+
+    def test_domain_circuit_open_log_callback_can_inspect_state_without_deadlock(self):
+        crawler = self.make_crawler_with_source_config(
+            "/tmp/missing.txt",
+            None,
+            {"domain_failure_threshold": 2},
+        )
+
+        def inspect_on_circuit_open(message):
+            if "URL熔断" in message:
+                crawler._is_domain_circuit_open("blocked.example.com")
+
+        crawler.log_callback = inspect_on_circuit_open
+
+        worker = threading.Thread(
+            target=lambda: [
+                crawler._record_domain_fetch_failure(
+                    "https://blocked.example.com/list.html",
+                    "HTTP 521: Origin Down",
+                    status_code=521,
+                )
+                for _ in range(2)
+            ]
+        )
+        worker.daemon = True
+        worker.start()
+        worker.join(timeout=1)
+
+        self.assertFalse(worker.is_alive())
+        self.assertTrue(crawler._is_domain_circuit_open("blocked.example.com"))
+
+    def test_domain_fetch_failure_ignores_404_and_success_clears_blocked_count(self):
+        crawler = self.make_crawler_with_source_config(
+            "/tmp/missing.txt",
+            None,
+            {"domain_failure_threshold": 2},
+        )
+
+        crawler._record_domain_fetch_failure(
+            "https://blocked.example.com/missing.html",
+            "HTTP 404: Not Found",
+            status_code=404,
+        )
+        self.assertFalse(crawler._is_domain_circuit_open("blocked.example.com"))
+        self.assertNotIn("blocked.example.com", crawler._domain_failure_counts)
+
+        crawler._record_domain_fetch_failure(
+            "https://blocked.example.com/list.html",
+            "HTTP 521: Origin Down",
+            status_code=521,
+        )
+        self.assertEqual(crawler._domain_failure_counts.get("blocked.example.com"), 1)
+
+        crawler._record_domain_fetch_success("https://blocked.example.com/list.html")
+        self.assertNotIn("blocked.example.com", crawler._domain_failure_counts)
+        self.assertFalse(crawler._is_domain_circuit_open("blocked.example.com"))
+
     def test_topology_template_seed_urls_are_not_requested_without_values(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             urls_path = os.path.join(tmpdir, "urls.txt")

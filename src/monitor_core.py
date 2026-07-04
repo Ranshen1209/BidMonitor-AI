@@ -574,6 +574,10 @@ class MonitorCore:
         policy = (self.config.get("crawler", {}) or {}).get("notification_policy", "strict_keyword_and_ai")
         ai_unknown = str(ai_reason or "").startswith("AI请求异常") or str(ai_reason or "").startswith("AI结果未知")
         ai_can_notify = ai_checked and ai_relevant and not ai_unknown
+        if ai_unknown and ai_checked:
+            if policy == "keyword_only_on_ai_error":
+                return keyword_matched
+            return False
         if policy == "keyword_or_ai":
             return keyword_matched or ai_can_notify
         if policy == "keyword_only_on_ai_error":

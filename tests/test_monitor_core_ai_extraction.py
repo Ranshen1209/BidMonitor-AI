@@ -209,6 +209,34 @@ class MonitorCoreAIExtractionTests(unittest.TestCase):
     @patch("src.monitor_core.Storage")
     @patch("src.monitor_core.get_all_crawlers", return_value={})
     @patch("src.monitor_core.get_default_sites", return_value={})
+    def test_keyword_or_ai_policy_does_not_notify_keyword_match_on_ai_unknown(self, _sites, _classes, storage_cls):
+        for ai_result in [(False, "AI请求异常: boom"), (False, "AI结果未知: unclear")]:
+            with self.subTest(ai_result=ai_result):
+                storage = Mock(spec=Storage)
+                storage.exists.return_value = False
+                storage.save.return_value = 123
+                storage_cls.return_value = storage
+                monitor = MonitorCore(
+                    keywords=["智能化"],
+                    crawler_overrides={
+                        "enabled_sites": [],
+                        "notification_policy": "keyword_or_ai",
+                    },
+                    ai_config={"enable": False},
+                )
+                monitor.crawlers = [FakeCrawler()]
+                monitor.ai_guard = Mock()
+                monitor.ai_guard.check_relevance.return_value = ai_result
+
+                with patch("src.monitor_core.enrich_new_bid"):
+                    result = monitor.run_once()
+
+                self.assertEqual(result["matched_count"], 0)
+                storage.mark_notified.assert_called_once()
+
+    @patch("src.monitor_core.Storage")
+    @patch("src.monitor_core.get_all_crawlers", return_value={})
+    @patch("src.monitor_core.get_default_sites", return_value={})
     def test_strict_policy_does_not_notify_on_ai_error(self, _sites, _classes, storage_cls):
         storage = Mock(spec=Storage)
         storage.exists.return_value = False

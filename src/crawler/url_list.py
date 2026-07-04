@@ -803,6 +803,7 @@ class UrlListCrawler(BaseCrawler):
             )
             if depth == 0:
                 candidate_links = self._merge_candidate_links(self._topology_seed_links(seed_url), candidate_links)
+            candidate_links = self._sort_candidate_links(page_url, candidate_links)
             enqueued = 0
             for link in candidate_links[: self.max_follow_links_per_page]:
                 candidate_url = link.get("url", "")
@@ -928,6 +929,37 @@ class UrlListCrawler(BaseCrawler):
                 merged.append(link)
         return merged
 
+    def _score_candidate_link(self, page_url: str, link: Dict[str, str]) -> int:
+        url = link.get("url", "")
+        title = link.get("title", "")
+        rule = self._classify_url(url)
+        score = 0
+        if link.get("_topology_seed") == "1":
+            score += 100
+        if rule.get("page_type") == "detail":
+            score += 100
+        elif rule.get("page_type") in {"list", "search"}:
+            score += 30
+        if self._has_strong_bid_stage(title):
+            score += 40
+        if DATE_RE.search(title or ""):
+            score += 10
+        if any(keyword in title for keyword in ["弱电", "智能化", "安防", "监控", "消防"]):
+            score += 10
+        lowered = f"{url} {title}".lower()
+        if any(keyword in lowered for keyword in NEGATIVE_LINK_KEYWORDS):
+            score -= 60
+        if self._is_known_non_announcement_url(url):
+            score -= 200
+        return score
+
+    def _sort_candidate_links(self, page_url: str, links: List[Dict[str, str]]) -> List[Dict[str, str]]:
+        return sorted(
+            links,
+            key=lambda link: self._score_candidate_link(page_url, link),
+            reverse=True,
+        )
+
     def _has_topology_progress(self, parsed_bids: List[BidInfo], page_url: str) -> bool:
         for bid in parsed_bids:
             if bid.url != page_url:
@@ -1023,7 +1055,7 @@ class UrlListCrawler(BaseCrawler):
             url = urljoin(seed_url, str(raw_url))
             if url.rstrip("/") == seed_url.rstrip("/"):
                 continue
-            links.append({"title": str(raw_url), "url": url})
+            links.append({"title": str(raw_url), "url": url, "_topology_seed": "1"})
         return links
 
     def _read_txt_urls(self) -> List[str]:

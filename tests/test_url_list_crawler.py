@@ -98,6 +98,60 @@ class UrlListCrawlerTests(unittest.TestCase):
 
         self.assertEqual(crawler._classify_url("https://unknown.example.com/news-1.html")["page_type"], "detail")
 
+    @patch.object(UrlListCrawler, "_request_url")
+    def test_candidate_scoring_prioritizes_detail_links_over_noisy_lists(self, mock_request_url):
+        def fake_request(url):
+            if url == "https://portal.example.com/":
+                return (
+                    "<html><body>"
+                    "<a href='/company-1.html'>上海测试招标代理有限公司</a>"
+                    "<a href='/category/news.html'>政策法规新闻</a>"
+                    "<a href='/notice/1.html'>上海安防工程公开招标公告 2026-07-02</a>"
+                    "</body></html>",
+                    200,
+                    "OK",
+                )
+            if url == "https://portal.example.com/notice/1.html":
+                return (
+                    "<html><body><h1>上海安防工程公开招标公告</h1>"
+                    "<p>发布时间：2026-07-02</p><p>采购单位：上海测试单位</p>"
+                    "<p>公告正文：本项目采购安防监控系统。</p></body></html>",
+                    200,
+                    "OK",
+                )
+            raise AssertionError(f"unexpected url {url}")
+
+        mock_request_url.side_effect = fake_request
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            urls_path = os.path.join(tmpdir, "urls.txt")
+            diagnostics_path = os.path.join(tmpdir, "diagnostics.jsonl")
+            with open(urls_path, "w", encoding="utf-8") as f:
+                f.write("https://portal.example.com/\n")
+            topology_path = self.write_topologies(
+                tmpdir,
+                [
+                    {
+                        "id": "portal",
+                        "name": "Portal",
+                        "entry_url": "https://portal.example.com/",
+                        "allowed_hosts": ["portal.example.com"],
+                        "detail_url_regex": [r"/notice/\d+\.html$"],
+                    }
+                ],
+            )
+            crawler = self.make_crawler_with_source_config(
+                urls_path,
+                diagnostics_path,
+                {"topology_max_depth": 1, "max_follow_links_per_page": 1},
+                config={"site_topologies_path": topology_path},
+            )
+
+            bids = crawler.crawl()
+
+        self.assertEqual(len(bids), 1)
+        self.assertEqual(bids[0].url, "https://portal.example.com/notice/1.html")
+
     def test_rejects_known_non_announcement_urls(self):
         crawler = self.make_crawler_with_source_config("/tmp/missing.txt", None, {})
         rejected = [

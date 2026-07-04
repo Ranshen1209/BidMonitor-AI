@@ -552,6 +552,56 @@ class UrlListCrawlerTests(unittest.TestCase):
             self.assertEqual(len(bids), 1)
             self.assertEqual(bids[0].url, "https://portal.example.com/detail/42")
 
+    @patch.object(UrlListCrawler, "_request_url")
+    def test_topology_circuit_breaker_stops_repeated_521_domain_failures(self, mock_request_url):
+        requested = []
+
+        def fake_request(url):
+            requested.append(url)
+            return ("blocked", 521, "Origin Down")
+
+        mock_request_url.side_effect = fake_request
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            urls_path = os.path.join(tmpdir, "urls.txt")
+            diagnostics_path = os.path.join(tmpdir, "diagnostics.jsonl")
+            with open(urls_path, "w", encoding="utf-8") as f:
+                f.write("https://blocked.example.com/\n")
+            topology_path = self.write_topologies(
+                tmpdir,
+                [
+                    {
+                        "id": "blocked",
+                        "name": "Blocked Example",
+                        "entry_url": "https://blocked.example.com/",
+                        "allowed_hosts": ["blocked.example.com"],
+                        "seed_urls": [
+                            "https://blocked.example.com/list-1.html",
+                            "https://blocked.example.com/list-2.html",
+                            "https://blocked.example.com/list-3.html",
+                            "https://blocked.example.com/list-4.html",
+                        ],
+                        "list_url_regex": [r"/list-\d+\.html$"],
+                    }
+                ],
+            )
+            crawler = self.make_crawler_with_source_config(
+                urls_path,
+                diagnostics_path,
+                {
+                    "topology_max_depth": 1,
+                    "max_follow_links_per_page": 10,
+                    "domain_failure_threshold": 2,
+                },
+                config={"site_topologies_path": topology_path},
+            )
+
+            bids = crawler.crawl()
+
+        self.assertEqual(bids, [])
+        self.assertLessEqual(len(requested), 3)
+        self.assertTrue(crawler._is_domain_circuit_open("blocked.example.com"))
+
     def test_topology_template_seed_urls_are_not_requested_without_values(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             urls_path = os.path.join(tmpdir, "urls.txt")

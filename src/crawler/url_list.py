@@ -371,6 +371,12 @@ class UrlListCrawler(BaseCrawler):
         self.auth_cookies = source_config.get("auth_cookies", config.get("auth_cookies", []))
         self.preserve_missing_publish_date = bool(config.get("preserve_missing_publish_date"))
         self._last_domain_request_at: Dict[str, float] = {}
+        self.domain_failure_threshold = int(
+            source_config.get("domain_failure_threshold", config.get("domain_failure_threshold", 3))
+        )
+        self._domain_failure_counts: Dict[str, int] = {}
+        self._domain_circuit_open: set[str] = set()
+        self._domain_failure_lock = threading.Lock()
         self._domain_locks: Dict[str, threading.Lock] = {}
         self._domain_locks_guard = threading.Lock()
         self._diagnostics_lock = threading.Lock()
@@ -726,6 +732,16 @@ class UrlListCrawler(BaseCrawler):
             normalized_url = page_url.split("#", 1)[0]
             if normalized_url in visited:
                 continue
+            if self._is_domain_circuit_open(page_url):
+                self._record_diagnostic(
+                    page_url,
+                    "failed",
+                    "domain circuit open after repeated fetch failures",
+                    timestamp,
+                    cookie_used=cookie_used,
+                    rule=self._classify_url(page_url),
+                )
+                continue
             visited.add(normalized_url)
             self._emit_info(
                 f"[URL拓扑] {self.name}: depth={depth} visited={len(visited)} "
@@ -786,6 +802,7 @@ class UrlListCrawler(BaseCrawler):
                             html=html,
                         )
                         continue
+                self._record_domain_fetch_success(page_url)
             else:
                 html = prefetched_html
 
@@ -868,6 +885,7 @@ class UrlListCrawler(BaseCrawler):
         callback = getattr(self, "_topology_fetch_failure_callback", None)
         if callable(callback):
             callback(page_url, reason, status_code=status_code, html=html, exc=exc)
+        self._record_domain_fetch_failure(page_url, reason, status_code=status_code)
 
     def _merge_candidate_links(self, *groups: List[Dict[str, str]]) -> List[Dict[str, str]]:
         merged: List[Dict[str, str]] = []
@@ -1151,6 +1169,40 @@ class UrlListCrawler(BaseCrawler):
                     self._emit_info(f"[URL限频] {self.name}: {host} 等待 {wait_seconds:.1f}s")
                     time.sleep(wait_seconds)
             self._last_domain_request_at[host] = time.monotonic()
+
+    def _domain_key(self, url: str) -> str:
+        return urlparse(url).netloc.lower().split(":")[0]
+
+    def _is_domain_circuit_open(self, host_or_url: str) -> bool:
+        host = self._domain_key(host_or_url) if "://" in host_or_url else host_or_url.lower().split(":")[0]
+        if not host:
+            return False
+        with self._domain_failure_lock:
+            return host in self._domain_circuit_open
+
+    def _record_domain_fetch_success(self, url: str) -> None:
+        host = self._domain_key(url)
+        if not host:
+            return
+        with self._domain_failure_lock:
+            self._domain_failure_counts.pop(host, None)
+
+    def _record_domain_fetch_failure(self, url: str, reason: str, status_code: int = 0) -> None:
+        host = self._domain_key(url)
+        if not host:
+            return
+        blocked_failure = status_code in {403, 429, 521, 522, 523, 524} or status_code >= 500
+        blocked_failure = blocked_failure or any(
+            term in reason.lower() for term in ["timeout", "blocked", "captcha", "origin down"]
+        )
+        if not blocked_failure:
+            return
+        with self._domain_failure_lock:
+            count = self._domain_failure_counts.get(host, 0) + 1
+            self._domain_failure_counts[host] = count
+            if count >= self.domain_failure_threshold:
+                self._domain_circuit_open.add(host)
+                self._emit_info(f"[URL熔断] {self.name}: {host} 连续失败 {count} 次，本轮跳过后续同域请求")
 
     def _domain_lock(self, host: str) -> threading.Lock:
         with self._domain_locks_guard:

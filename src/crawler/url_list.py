@@ -723,7 +723,12 @@ class UrlListCrawler(BaseCrawler):
         stop_event=None,
     ) -> List[BidInfo]:
         bids: List[BidInfo] = []
-        queue: List[Tuple[str, int, Optional[str], str]] = [(seed_url, 0, seed_html, "")]
+        queue: List[Tuple[str, int, Optional[str], str, Optional[Dict[str, Any]]]] = [
+            (seed_url, 0, seed_html, "", None)
+        ]
+        search_request = self._topology_search_request(seed_url)
+        if search_request:
+            queue.append((search_request["url"], 0, None, "", search_request))
         visited: set[str] = set()
         self._emit_info(
             f"[URL拓扑] {self.name}: 开始 {self._short_url(seed_url)}，"
@@ -734,7 +739,7 @@ class UrlListCrawler(BaseCrawler):
             if stop_event and stop_event.is_set():
                 self.logger.info(f"[{self.name}] Topology crawl interrupted by stop signal")
                 break
-            page_url, depth, prefetched_html, expected_title = queue.pop(0)
+            page_url, depth, prefetched_html, expected_title, request_meta = queue.pop(0)
             normalized_url = page_url.split("#", 1)[0]
             if normalized_url in visited:
                 continue
@@ -756,7 +761,12 @@ class UrlListCrawler(BaseCrawler):
             )
 
             if prefetched_html is None:
-                fetched = self._fetch_topology_page_with_domain_gate(page_url, timestamp, cookie_used)
+                fetched = self._fetch_topology_page_with_domain_gate(
+                    page_url,
+                    timestamp,
+                    cookie_used,
+                    request_meta=request_meta,
+                )
                 if fetched is None:
                     continue
                 html, status_code, _status_text = fetched
@@ -811,7 +821,7 @@ class UrlListCrawler(BaseCrawler):
                     continue
                 if not self._should_follow_candidate(page_url, candidate_url, depth):
                     continue
-                queue.append((candidate_url, depth + 1, None, link.get("title", "")))
+                queue.append((candidate_url, depth + 1, None, link.get("title", ""), None))
                 enqueued += 1
             if candidate_links:
                 self._emit_info(
@@ -837,6 +847,7 @@ class UrlListCrawler(BaseCrawler):
         page_url: str,
         timestamp: str,
         cookie_used: bool,
+        request_meta: Optional[Dict[str, Any]] = None,
     ) -> Optional[Tuple[str, int, str]]:
         with self._topology_fetch_gate(page_url):
             if self._is_domain_circuit_open(page_url):
@@ -856,7 +867,15 @@ class UrlListCrawler(BaseCrawler):
             else:
                 try:
                     self._respect_rate_limit(page_url)
-                    html, status_code, status_text = self._request_url(page_url)
+                    if request_meta:
+                        html, status_code, status_text = self._request_http(
+                            request_meta.get("method", "GET"),
+                            request_meta.get("url", page_url),
+                            params=request_meta.get("params"),
+                            data=request_meta.get("data"),
+                        )
+                    else:
+                        html, status_code, status_text = self._request_url(page_url)
                 except Exception as exc:
                     reason = f"{exc.__class__.__name__}: {exc}"
                     if self._should_retry_browser_for_fetch_failure(page_url):
@@ -1056,6 +1075,28 @@ class UrlListCrawler(BaseCrawler):
             links.append({"title": str(raw_url), "url": url})
         return links
 
+    def _topology_search_request(self, seed_url: str) -> Optional[Dict[str, Any]]:
+        topology = self._topology_for_url(seed_url)
+        search = (topology or {}).get("search") or {}
+        if not isinstance(search, dict):
+            return None
+        method = str(search.get("method", "GET")).upper()
+        if method not in {"GET", "POST", "GET_OR_POST"}:
+            return None
+        url = str(search.get("url") or "").strip()
+        if not url or "{" in url or "}" in url:
+            return None
+        defaults = search.get("defaults") if isinstance(search.get("defaults"), dict) else {}
+        params = {key: defaults.get(key, "") for key in search.get("params", []) or []}
+        if method == "GET_OR_POST":
+            method = "GET"
+        return {
+            "method": method,
+            "url": urljoin(seed_url, url),
+            "params": params if method == "GET" else {},
+            "data": params if method == "POST" else {},
+        }
+
     def _read_txt_urls(self) -> List[str]:
         with open(self.file_path, "r", encoding="utf-8-sig") as f:
             return [line.strip() for line in f]
@@ -1101,23 +1142,46 @@ class UrlListCrawler(BaseCrawler):
         return bool(re.match(r"^https?://[^\s]+$", str(value).strip(), re.IGNORECASE))
 
     def _request_url(self, url: str) -> Tuple[str, int, str]:
+        return self._request_http("GET", url)
+
+    def _request_http(
+        self,
+        method: str,
+        url: str,
+        params: Optional[Dict[str, Any]] = None,
+        data: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[str, int, str]:
         if self.session is None:
             raise requests.RequestException("requests is required for HTTP fetching. Install requirements.txt.")
+        method = str(method or "GET").upper()
+        if method not in {"GET", "POST"}:
+            raise requests.RequestException(f"unsupported HTTP method: {method}")
         headers = self._get_headers()
         cookie = self._get_cookie_for_url(url)
         if cookie:
             headers["Cookie"] = cookie
 
         started_at = time.monotonic()
-        self._emit_info(f"[URL请求] {self.name}: HTTP GET {self._short_url(url)}")
+        self._emit_info(f"[URL请求] {self.name}: HTTP {method} {self._short_url(url)}")
         try:
-            response = self.session.get(
-                url,
-                headers=headers,
-                timeout=self.timeout,
-                verify=False,
-                allow_redirects=True,
-            )
+            if method == "POST":
+                response = self.session.post(
+                    url,
+                    data=data or {},
+                    headers=headers,
+                    timeout=self.timeout,
+                    verify=False,
+                    allow_redirects=True,
+                )
+            else:
+                response = self.session.get(
+                    url,
+                    params=params or {},
+                    headers=headers,
+                    timeout=self.timeout,
+                    verify=False,
+                    allow_redirects=True,
+                )
         except Exception as exc:
             elapsed = time.monotonic() - started_at
             self._emit_info(f"[URL请求] {self.name}: HTTP异常 {exc.__class__.__name__}，耗时 {elapsed:.1f}s {self._short_url(url)}")

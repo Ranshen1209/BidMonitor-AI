@@ -59,6 +59,173 @@ class UrlListCrawlerTests(unittest.TestCase):
             f.write(json.dumps({"version": 1, "sites": sites}, ensure_ascii=False))
         return path
 
+    def test_topology_search_request_uses_post_when_configured(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            urls_path = os.path.join(tmpdir, "urls.txt")
+            with open(urls_path, "w", encoding="utf-8") as f:
+                f.write("https://portal.example.com/\n")
+            topology_path = self.write_topologies(
+                tmpdir,
+                [
+                    {
+                        "id": "portal",
+                        "name": "Portal",
+                        "entry_url": "https://portal.example.com/",
+                        "allowed_hosts": ["portal.example.com"],
+                        "search": {
+                            "method": "POST",
+                            "url": "https://portal.example.com/api/search",
+                            "params": ["pageNum", "title"],
+                            "defaults": {"pageNum": 1, "title": ""},
+                        },
+                    }
+                ],
+            )
+            crawler = self.make_crawler_with_source_config(
+                urls_path,
+                None,
+                {},
+                config={"site_topologies_path": topology_path},
+            )
+
+            request = crawler._topology_search_request("https://portal.example.com/")
+
+        self.assertEqual(request["method"], "POST")
+        self.assertEqual(request["url"], "https://portal.example.com/api/search")
+        self.assertEqual(request["data"], {"pageNum": 1, "title": ""})
+
+    def test_topology_search_request_uses_get_params_when_configured(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            urls_path = os.path.join(tmpdir, "urls.txt")
+            with open(urls_path, "w", encoding="utf-8") as f:
+                f.write("https://portal.example.com/\n")
+            topology_path = self.write_topologies(
+                tmpdir,
+                [
+                    {
+                        "id": "portal",
+                        "name": "Portal",
+                        "entry_url": "https://portal.example.com/",
+                        "allowed_hosts": ["portal.example.com"],
+                        "search": {
+                            "method": "GET",
+                            "url": "/api/search",
+                            "params": ["pageNum", "title"],
+                            "defaults": {"pageNum": 1, "title": ""},
+                        },
+                    }
+                ],
+            )
+            crawler = self.make_crawler_with_source_config(
+                urls_path,
+                None,
+                {},
+                config={"site_topologies_path": topology_path},
+            )
+
+            request = crawler._topology_search_request("https://portal.example.com/")
+
+        self.assertEqual(request["method"], "GET")
+        self.assertEqual(request["url"], "https://portal.example.com/api/search")
+        self.assertEqual(request["params"], {"pageNum": 1, "title": ""})
+        self.assertEqual(request["data"], {})
+
+    def test_topology_search_request_rejects_templated_url(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            urls_path = os.path.join(tmpdir, "urls.txt")
+            with open(urls_path, "w", encoding="utf-8") as f:
+                f.write("https://portal.example.com/\n")
+            topology_path = self.write_topologies(
+                tmpdir,
+                [
+                    {
+                        "id": "portal",
+                        "name": "Portal",
+                        "entry_url": "https://portal.example.com/",
+                        "allowed_hosts": ["portal.example.com"],
+                        "search": {"method": "POST", "url": "/api/search/{page}"},
+                    }
+                ],
+            )
+            crawler = self.make_crawler_with_source_config(
+                urls_path,
+                None,
+                {},
+                config={"site_topologies_path": topology_path},
+            )
+
+            request = crawler._topology_search_request("https://portal.example.com/")
+
+        self.assertIsNone(request)
+
+    def test_topology_crawl_executes_post_search_request(self):
+        calls = []
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            urls_path = os.path.join(tmpdir, "urls.txt")
+            with open(urls_path, "w", encoding="utf-8") as f:
+                f.write("https://portal.example.com/\n")
+            topology_path = self.write_topologies(
+                tmpdir,
+                [
+                    {
+                        "id": "portal",
+                        "name": "Portal",
+                        "entry_url": "https://portal.example.com/",
+                        "allowed_hosts": ["portal.example.com"],
+                        "detail_url_regex": [r"/detail/\d+$"],
+                        "search": {
+                            "method": "POST",
+                            "url": "/api/search",
+                            "params": ["pageNum", "title"],
+                            "defaults": {"pageNum": 1, "title": ""},
+                        },
+                    }
+                ],
+            )
+            crawler = self.make_crawler_with_source_config(
+                urls_path,
+                None,
+                {"topology_max_depth": 1},
+                config={"site_topologies_path": topology_path},
+            )
+
+            def fake_request_http(method, url, params=None, data=None):
+                calls.append((method, url, params, data))
+                self.assertEqual(method, "POST")
+                self.assertEqual(url, "https://portal.example.com/api/search")
+                self.assertEqual(data, {"pageNum": 1, "title": ""})
+                return (
+                    "<html><body><a href='/detail/42'>上海安防工程公开招标公告</a></body></html>",
+                    200,
+                    "OK",
+                )
+
+            def fake_request_url(url):
+                if url == "https://portal.example.com/detail/42":
+                    return (
+                        "<html><body><h1>上海安防工程公开招标公告</h1>"
+                        "<p>发布时间：2026-07-02</p><p>采购单位：上海测试单位</p>"
+                        "<p>公告正文：本项目采购安防监控系统。</p></body></html>",
+                        200,
+                        "OK",
+                    )
+                raise AssertionError(f"unexpected url {url}")
+
+            crawler._request_http = fake_request_http
+            crawler._request_url = fake_request_url
+
+            bids = crawler._crawl_topology_from_url(
+                "https://portal.example.com/",
+                "",
+                "2026-07-04T00:00:00",
+                crawler._classify_url("https://portal.example.com/"),
+            )
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(len(bids), 1)
+        self.assertEqual(bids[0].url, "https://portal.example.com/detail/42")
+
     def test_topology_detail_regex_blocks_generic_html_fallback_on_same_topology_host(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             urls_path = os.path.join(tmpdir, "urls.txt")

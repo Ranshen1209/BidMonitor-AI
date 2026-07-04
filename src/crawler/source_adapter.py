@@ -110,8 +110,10 @@ class TopologySourceAdapter:
             detail_failure_urls: set[str] = set()
             followed_candidate_urls: set[str] = set()
             original_request_url = crawler._request_url
+            original_request_http = crawler._request_http
             original_request_url_with_browser = crawler._request_url_with_browser
             original_should_follow_candidate = crawler._should_follow_candidate
+            original_sort_candidate_links = crawler._sort_candidate_links
             had_topology_fetch_failure_callback = hasattr(crawler, "_topology_fetch_failure_callback")
             original_topology_fetch_failure_callback = getattr(
                 crawler, "_topology_fetch_failure_callback", None
@@ -164,6 +166,34 @@ class TopologySourceAdapter:
                 request_url_and_collect_json.call_count += 1
                 response_rule = crawler._classify_url(url)
                 response_html, response_status, response_text = original_request_url(url)
+                return collect_json_response(url, response_rule, response_html, response_status, response_text)
+
+            def request_http_and_collect_json(
+                method: str,
+                url: str,
+                params: dict[str, Any] | None = None,
+                data: dict[str, Any] | None = None,
+            ):
+                normalized_url = normalize_notice_url(url)
+                if normalized_url and normalized_url in admitted_structured_urls:
+                    return "", 204, "Skipped admitted structured URL"
+                request_http_and_collect_json.call_count += 1
+                response_rule = crawler._classify_url(url)
+                response_html, response_status, response_text = original_request_http(
+                    method,
+                    url,
+                    params=params,
+                    data=data,
+                )
+                return collect_json_response(url, response_rule, response_html, response_status, response_text)
+
+            def collect_json_response(
+                url: str,
+                response_rule: dict[str, str],
+                response_html: str,
+                response_status: int,
+                response_text: str,
+            ):
                 response_blocked = response_status < 400 and crawler._contains_blocked_sign(response_html, url)
                 if response_status >= 400 or response_blocked:
                     return response_html, response_status, response_text
@@ -191,11 +221,26 @@ class TopologySourceAdapter:
                     followed_candidate_urls.add(normalized_candidate or absolute_candidate.split("#", 1)[0])
                 return should_follow
 
+            def sort_with_topology_seed_priority(page_url: str, links: list[dict[str, str]]) -> list[dict[str, str]]:
+                sorted_links = original_sort_candidate_links(page_url, links)
+                seed_links = []
+                other_links = []
+                for link in sorted_links:
+                    link_url = link.get("url", "").split("#", 1)[0]
+                    if link_url in topology_seed_urls:
+                        seed_links.append(link)
+                    else:
+                        other_links.append(link)
+                return seed_links + other_links
+
             request_url_and_collect_json.call_count = request_count_before + initial_fetch_count
+            request_http_and_collect_json.call_count = 0
             request_url_with_browser_and_count.call_count = 0
             crawler._request_url = request_url_and_collect_json
+            crawler._request_http = request_http_and_collect_json
             crawler._request_url_with_browser = request_url_with_browser_and_count
             crawler._should_follow_candidate = should_follow_unadmitted_candidate
+            crawler._sort_candidate_links = sort_with_topology_seed_priority
             crawler._topology_fetch_failure_callback = record_topology_fetch_failure
             try:
                 legacy_bids = crawler._crawl_topology_from_url(
@@ -205,12 +250,18 @@ class TopologySourceAdapter:
                     rule,
                     cookie_used=cookie_used,
                 )
-                request_delta = self._request_call_count(crawler) - request_count_before
+                request_delta = (
+                    self._request_call_count(crawler)
+                    - request_count_before
+                    + request_http_and_collect_json.call_count
+                )
                 browser_request_delta = request_url_with_browser_and_count.call_count
             finally:
                 crawler._request_url = original_request_url
+                crawler._request_http = original_request_http
                 crawler._request_url_with_browser = original_request_url_with_browser
                 crawler._should_follow_candidate = original_should_follow_candidate
+                crawler._sort_candidate_links = original_sort_candidate_links
                 if had_topology_fetch_failure_callback:
                     crawler._topology_fetch_failure_callback = original_topology_fetch_failure_callback
                 elif hasattr(crawler, "_topology_fetch_failure_callback"):

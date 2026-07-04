@@ -33,6 +33,59 @@ def make_source():
 
 
 class TopologySourceAdapterTests(unittest.TestCase):
+    @patch("crawler.url_list.UrlListCrawler._request_http")
+    @patch("crawler.url_list.UrlListCrawler._request_url")
+    def test_collect_admits_structured_json_from_post_search(self, mock_request_url, mock_request_http):
+        source = Source(
+            id="portal",
+            name="Portal",
+            url="https://portal.example.com/",
+            topology={
+                "id": "portal",
+                "name": "Portal",
+                "entry_url": "https://portal.example.com/",
+                "allowed_hosts": ["portal.example.com"],
+                "search": {
+                    "method": "POST",
+                    "url": "/api/search",
+                    "params": ["pageNum", "title"],
+                    "defaults": {"pageNum": 1, "title": ""},
+                },
+            },
+        )
+        payload = {
+            "records": [
+                {
+                    "title": "上海智能化设备采购意向",
+                    "detailUrl": "/detail/42",
+                    "publishDate": "2026-07-01",
+                    "purchaser": "上海采购人",
+                    "content": "本项目采购弱电智能化系统",
+                }
+            ]
+        }
+
+        def fake_request(url):
+            if url == "https://portal.example.com/":
+                return "<html><body></body></html>", 200, "OK"
+            raise AssertionError(f"unexpected url {url}")
+
+        def fake_request_http(method, url, params=None, data=None):
+            self.assertEqual(method, "POST")
+            self.assertEqual(url, "https://portal.example.com/api/search")
+            self.assertEqual(data, {"pageNum": 1, "title": ""})
+            return json.dumps(payload, ensure_ascii=False), 200, "OK"
+
+        mock_request_url.side_effect = fake_request
+        mock_request_http.side_effect = fake_request_http
+
+        result = TopologySourceAdapter({"request_delay": 0, "domain_delay": 0}).collect(source)
+
+        self.assertEqual(len(result.notices), 1)
+        self.assertEqual(result.notices[0].detail_url, "https://portal.example.com/detail/42")
+        self.assertEqual(result.notices[0].publish_date, "2026-07-01")
+        self.assertEqual(result.error_count, 0)
+
     @patch("crawler.url_list.UrlListCrawler._request_url")
     def test_collect_admits_structured_json_record_without_detail_fetch(self, mock_request_url):
         payload = {

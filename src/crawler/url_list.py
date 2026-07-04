@@ -141,8 +141,6 @@ DOWNLOAD_PATH_TERMS = [
     "export",
 ]
 
-HASH_LOGIN_TERMS = ["#/login", "#/signin", "#/auth", "#/user/login"]
-
 FIELD_STOP_LABELS = [
     "采购项目名称",
     "招标项目名称",
@@ -1429,11 +1427,11 @@ class UrlListCrawler(BaseCrawler):
         parsed = urlparse(url)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             return False
-        lowered_full = url.lower()
-        if any(term in lowered_full for term in HASH_LOGIN_TERMS):
-            return False
         path_lower = parsed.path.lower()
         query_lower = parsed.query.lower()
+        fragment_lower = parsed.fragment.lower()
+        if self._is_login_route(path_lower, query_lower, fragment_lower):
+            return False
         _, ext = os.path.splitext(path_lower.rstrip("/"))
         if ext in STATIC_OR_BINARY_EXTENSIONS:
             return False
@@ -1760,17 +1758,31 @@ class UrlListCrawler(BaseCrawler):
         )
 
     def _matches_login_route(self, route: str) -> bool:
-        normalized = route.lower().strip()
-        if not normalized:
+        segments = self._route_segments(route)
+        if not segments:
             return False
-        normalized = normalized.replace("\\", "/")
-        segments = [segment for segment in re.split(r"[/?#&=]+", normalized) if segment]
-        if any(segment in {"login", "signin", "auth", "sso", "login_bidder", "memberlogin"} for segment in segments):
+        single_segment_terms = {"login", "signin", "auth", "sso", "login_bidder", "memberlogin"}
+        if any(segment in single_segment_terms for segment in segments):
             return True
-        return any(
-            f"/{phrase}" in f"/{normalized}"
-            for phrase in ["user/login", "default/login"]
-        )
+        multi_segment_terms = [("user", "login"), ("default", "login")]
+        return any(self._has_segment_window(segments, term) for term in multi_segment_terms)
+
+    def _route_segments(self, route: str) -> List[str]:
+        normalized = route.lower().strip().replace("\\", "/")
+        segments = []
+        for segment in re.split(r"[/?#&=]+", normalized):
+            if not segment:
+                continue
+            basename, ext = os.path.splitext(segment)
+            if ext in {".htm", ".html", ".jsp", ".aspx"} and basename:
+                segments.append(basename)
+            else:
+                segments.append(segment)
+        return segments
+
+    def _has_segment_window(self, segments: List[str], term: Tuple[str, ...]) -> bool:
+        width = len(term)
+        return any(tuple(segments[index:index + width]) == term for index in range(len(segments) - width + 1))
 
     def _is_detail_url(self, path: str, query: str) -> bool:
         filename = os.path.basename(path.rstrip("/"))

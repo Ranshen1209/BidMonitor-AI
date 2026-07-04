@@ -165,7 +165,12 @@ class TopologySourceAdapter:
                     return "", 204, "Skipped admitted structured URL"
                 request_url_and_collect_json.call_count += 1
                 response_rule = crawler._classify_url(url)
-                response_html, response_status, response_text = original_request_url(url)
+                current_request_http = crawler._request_http
+                crawler._request_http = original_request_http
+                try:
+                    response_html, response_status, response_text = original_request_url(url)
+                finally:
+                    crawler._request_http = current_request_http
                 return collect_json_response(url, response_rule, response_html, response_status, response_text)
 
             def request_http_and_collect_json(

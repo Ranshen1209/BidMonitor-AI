@@ -729,6 +729,46 @@ class TopologySourceAdapterTests(unittest.TestCase):
         self.assertEqual(len(result.notices), 1)
         self.assertGreaterEqual(result.fetched_count, 3)
 
+    def test_collect_counts_delegated_get_once_per_actual_request(self):
+        adapter = TopologySourceAdapter({"request_delay": 0, "domain_delay": 0})
+        source = make_source()
+        crawler = adapter._build_crawler(source)
+        responses = {
+            "https://portal.example.com/": (
+                "<html><body><a href='/notices/'>Notices</a></body></html>",
+                200,
+                "OK",
+            ),
+            "https://portal.example.com/notices/": (
+                "<html><body><a href='/detail/42'>上海安防工程公开招标公告</a></body></html>",
+                200,
+                "OK",
+            ),
+            "https://portal.example.com/detail/42": (
+                "<html><body><h1>上海安防工程公开招标公告</h1>"
+                "<p>发布时间：2026-07-02</p>"
+                "<p>采购单位：上海测试单位。</p>"
+                "<p>公告正文：本项目采购安防监控系统。</p></body></html>",
+                200,
+                "OK",
+            ),
+        }
+        requested = []
+
+        def fake_request_http(method, url, params=None, data=None):
+            requested.append((method, url, params, data))
+            self.assertEqual(method, "GET")
+            return responses[url]
+
+        crawler._request_http = fake_request_http
+
+        with patch.object(adapter, "_build_crawler", return_value=crawler):
+            result = adapter.collect(source)
+
+        self.assertEqual(len(result.notices), 1)
+        self.assertEqual(len(requested), 3)
+        self.assertEqual(result.fetched_count, len(requested))
+
     @patch("crawler.url_list.UrlListCrawler._request_url")
     def test_collect_preserves_missing_detail_publish_date_as_empty(self, mock_request_url):
         def fake_request(url):

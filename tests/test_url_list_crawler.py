@@ -226,6 +226,74 @@ class UrlListCrawlerTests(unittest.TestCase):
         self.assertEqual(len(bids), 1)
         self.assertEqual(bids[0].url, "https://portal.example.com/detail/42")
 
+    def test_topology_crawl_executes_post_search_when_seed_matches_search_url(self):
+        calls = []
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            urls_path = os.path.join(tmpdir, "urls.txt")
+            with open(urls_path, "w", encoding="utf-8") as f:
+                f.write("https://portal.example.com/api/search\n")
+            topology_path = self.write_topologies(
+                tmpdir,
+                [
+                    {
+                        "id": "portal",
+                        "name": "Portal",
+                        "entry_url": "https://portal.example.com/api/search",
+                        "allowed_hosts": ["portal.example.com"],
+                        "detail_url_regex": [r"/detail/\d+$"],
+                        "search": {
+                            "method": "POST",
+                            "url": "https://portal.example.com/api/search",
+                            "params": ["pageNum", "title"],
+                            "defaults": {"pageNum": 1, "title": ""},
+                        },
+                    }
+                ],
+            )
+            crawler = self.make_crawler_with_source_config(
+                urls_path,
+                None,
+                {"topology_max_depth": 1},
+                config={"site_topologies_path": topology_path},
+            )
+
+            def fake_request_http(method, url, params=None, data=None):
+                calls.append((method, url, params, data))
+                self.assertEqual(method, "POST")
+                self.assertEqual(url, "https://portal.example.com/api/search")
+                self.assertEqual(data, {"pageNum": 1, "title": ""})
+                return (
+                    "<html><body><a href='/detail/42'>上海安防工程公开招标公告</a></body></html>",
+                    200,
+                    "OK",
+                )
+
+            def fake_request_url(url):
+                if url == "https://portal.example.com/detail/42":
+                    return (
+                        "<html><body><h1>上海安防工程公开招标公告</h1>"
+                        "<p>发布时间：2026-07-02</p><p>采购单位：上海测试单位</p>"
+                        "<p>公告正文：本项目采购安防监控系统。</p></body></html>",
+                        200,
+                        "OK",
+                    )
+                raise AssertionError(f"unexpected url {url}")
+
+            crawler._request_http = fake_request_http
+            crawler._request_url = fake_request_url
+
+            bids = crawler._crawl_topology_from_url(
+                "https://portal.example.com/api/search",
+                "<html><body><div id='app'></div></body></html>",
+                "2026-07-04T00:00:00",
+                crawler._classify_url("https://portal.example.com/api/search"),
+            )
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(len(bids), 1)
+        self.assertEqual(bids[0].url, "https://portal.example.com/detail/42")
+
     def test_topology_post_search_no_progress_does_not_retry_as_browser_get(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             urls_path = os.path.join(tmpdir, "urls.txt")

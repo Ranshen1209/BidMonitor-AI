@@ -729,7 +729,7 @@ class UrlListCrawler(BaseCrawler):
         search_request = self._topology_search_request(seed_url)
         if search_request:
             queue.append((search_request["url"], 0, None, "", search_request))
-        visited: set[str] = set()
+        visited: set[Tuple[str, str, str]] = set()
         self._emit_info(
             f"[URL拓扑] {self.name}: 开始 {self._short_url(seed_url)}，"
             f"最大详情 {self.max_detail_pages_per_seed}，每页候选 {self.max_follow_links_per_page}"
@@ -742,7 +742,8 @@ class UrlListCrawler(BaseCrawler):
             page_url, depth, prefetched_html, expected_title, request_meta = queue.pop(0)
             request_is_post = bool(request_meta and str(request_meta.get("method", "GET")).upper() == "POST")
             normalized_url = page_url.split("#", 1)[0]
-            if normalized_url in visited:
+            visit_key = self._topology_visit_key(page_url, request_meta)
+            if visit_key in visited:
                 continue
             if self._is_domain_circuit_open(page_url):
                 self._record_diagnostic(
@@ -754,7 +755,7 @@ class UrlListCrawler(BaseCrawler):
                     rule=self._classify_url(page_url),
                 )
                 continue
-            visited.add(normalized_url)
+            visited.add(visit_key)
             self._emit_info(
                 f"[URL拓扑] {self.name}: depth={depth} visited={len(visited)} "
                 f"queue={len(queue)} bids={len(bids)}/{self.max_detail_pages_per_seed} "
@@ -822,7 +823,7 @@ class UrlListCrawler(BaseCrawler):
             enqueued = 0
             for link in candidate_links[: self.max_follow_links_per_page]:
                 candidate_url = link.get("url", "")
-                if not candidate_url or candidate_url.split("#", 1)[0] in visited:
+                if not candidate_url or self._topology_visit_key(candidate_url, None) in visited:
                     continue
                 if not self._should_follow_candidate(page_url, candidate_url, depth):
                     continue
@@ -835,6 +836,26 @@ class UrlListCrawler(BaseCrawler):
                 )
 
         return bids
+
+    def _topology_visit_key(
+        self,
+        url: str,
+        request_meta: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[str, str, str]:
+        normalized_url = (url or "").split("#", 1)[0]
+        if not request_meta:
+            return ("GET", normalized_url, "")
+        method = str(request_meta.get("method", "GET") or "GET").upper()
+        request_url = str(request_meta.get("url") or normalized_url).split("#", 1)[0]
+        payload = {
+            "params": request_meta.get("params") or {},
+            "data": request_meta.get("data") or {},
+        }
+        try:
+            serialized_payload = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
+        except (TypeError, ValueError):
+            serialized_payload = repr(payload)
+        return (method, request_url, serialized_payload)
 
     def _topology_fetch_failure_reason(
         self,

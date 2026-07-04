@@ -3,7 +3,7 @@ import os
 import threading
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import sys
 
@@ -225,6 +225,109 @@ class UrlListCrawlerTests(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         self.assertEqual(len(bids), 1)
         self.assertEqual(bids[0].url, "https://portal.example.com/detail/42")
+
+    def test_topology_post_search_no_progress_does_not_retry_as_browser_get(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            urls_path = os.path.join(tmpdir, "urls.txt")
+            with open(urls_path, "w", encoding="utf-8") as f:
+                f.write("https://portal.example.com/\n")
+            topology_path = self.write_topologies(
+                tmpdir,
+                [
+                    {
+                        "id": "portal",
+                        "name": "Portal",
+                        "entry_url": "https://portal.example.com/",
+                        "allowed_hosts": ["portal.example.com"],
+                        "search": {
+                            "method": "POST",
+                            "url": "/api/search",
+                            "params": ["pageNum", "title"],
+                            "defaults": {"pageNum": 1, "title": ""},
+                        },
+                    }
+                ],
+            )
+            crawler = self.make_crawler_with_source_config(
+                urls_path,
+                None,
+                {"topology_max_depth": 1},
+                config={"site_topologies_path": topology_path, "use_selenium": True},
+            )
+            crawler._request_http = Mock(return_value=("<html><body><div id='app'></div></body></html>", 200, "OK"))
+            crawler._request_url_with_browser = Mock(
+                side_effect=AssertionError("POST search must not retry through browser GET fallback")
+            )
+            crawler._should_retry_browser_after_no_progress = (
+                lambda url, prefetched_html: url == "https://portal.example.com/api/search"
+            )
+
+            bids = crawler._crawl_topology_from_url(
+                "https://portal.example.com/",
+                "",
+                "2026-07-04T00:00:00",
+                crawler._classify_url("https://portal.example.com/"),
+            )
+
+        self.assertEqual(bids, [])
+        crawler._request_http.assert_called_once_with(
+            "POST",
+            "https://portal.example.com/api/search",
+            params={},
+            data={"pageNum": 1, "title": ""},
+        )
+        crawler._request_url_with_browser.assert_not_called()
+
+    def test_topology_post_search_fetch_failure_does_not_retry_as_browser_get(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            urls_path = os.path.join(tmpdir, "urls.txt")
+            diagnostics_path = os.path.join(tmpdir, "diagnostics.jsonl")
+            with open(urls_path, "w", encoding="utf-8") as f:
+                f.write("https://portal.example.com/\n")
+            topology_path = self.write_topologies(
+                tmpdir,
+                [
+                    {
+                        "id": "portal",
+                        "name": "Portal",
+                        "entry_url": "https://portal.example.com/",
+                        "allowed_hosts": ["portal.example.com"],
+                        "search": {
+                            "method": "POST",
+                            "url": "/api/search",
+                            "params": ["pageNum", "title"],
+                            "defaults": {"pageNum": 1, "title": ""},
+                        },
+                    }
+                ],
+            )
+            crawler = self.make_crawler_with_source_config(
+                urls_path,
+                diagnostics_path,
+                {"topology_max_depth": 1},
+                config={"site_topologies_path": topology_path, "use_selenium": True},
+            )
+            crawler._request_http = Mock(side_effect=requests.exceptions.Timeout("slow"))
+            crawler._request_url_with_browser = Mock(
+                side_effect=AssertionError("POST search must not retry through browser GET fallback")
+            )
+            crawler._should_retry_browser_for_fetch_failure = lambda url: url == "https://portal.example.com/api/search"
+
+            bids = crawler._crawl_topology_from_url(
+                "https://portal.example.com/",
+                "",
+                "2026-07-04T00:00:00",
+                crawler._classify_url("https://portal.example.com/"),
+            )
+
+        self.assertEqual(bids, [])
+        crawler._request_http.assert_called_once_with(
+            "POST",
+            "https://portal.example.com/api/search",
+            params={},
+            data={"pageNum": 1, "title": ""},
+        )
+        crawler._request_url_with_browser.assert_not_called()
 
     def test_topology_detail_regex_blocks_generic_html_fallback_on_same_topology_host(self):
         with tempfile.TemporaryDirectory() as tmpdir:

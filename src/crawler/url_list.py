@@ -740,6 +740,7 @@ class UrlListCrawler(BaseCrawler):
                 self.logger.info(f"[{self.name}] Topology crawl interrupted by stop signal")
                 break
             page_url, depth, prefetched_html, expected_title, request_meta = queue.pop(0)
+            request_is_post = bool(request_meta and str(request_meta.get("method", "GET")).upper() == "POST")
             normalized_url = page_url.split("#", 1)[0]
             if normalized_url in visited:
                 continue
@@ -774,7 +775,11 @@ class UrlListCrawler(BaseCrawler):
                 html = prefetched_html
 
             parsed_bids = self._parse_page(html, page_url, timestamp)
-            if self._should_retry_browser_after_no_progress(page_url, prefetched_html) and not self._has_topology_progress(parsed_bids, page_url):
+            if (
+                not request_is_post
+                and self._should_retry_browser_after_no_progress(page_url, prefetched_html)
+                and not self._has_topology_progress(parsed_bids, page_url)
+            ):
                 self._emit_info(f"[URL浏览器] {self.name}: HTTP无进展，尝试浏览器 {self._short_url(page_url)}")
                 browser_result = self._request_url_with_browser(page_url)
                 if browser_result:
@@ -850,6 +855,7 @@ class UrlListCrawler(BaseCrawler):
         request_meta: Optional[Dict[str, Any]] = None,
     ) -> Optional[Tuple[str, int, str]]:
         with self._topology_fetch_gate(page_url):
+            request_is_post = bool(request_meta and str(request_meta.get("method", "GET")).upper() == "POST")
             if self._is_domain_circuit_open(page_url):
                 self._record_diagnostic(
                     page_url,
@@ -861,7 +867,7 @@ class UrlListCrawler(BaseCrawler):
                 )
                 return None
             browser_first = self._prefers_browser_fetch(page_url)
-            browser_result = self._request_url_with_browser(page_url) if browser_first else None
+            browser_result = self._request_url_with_browser(page_url) if browser_first and not request_is_post else None
             if browser_result:
                 html, status_code, status_text = browser_result
             else:
@@ -878,7 +884,7 @@ class UrlListCrawler(BaseCrawler):
                         html, status_code, status_text = self._request_url(page_url)
                 except Exception as exc:
                     reason = f"{exc.__class__.__name__}: {exc}"
-                    if self._should_retry_browser_for_fetch_failure(page_url):
+                    if not request_is_post and self._should_retry_browser_for_fetch_failure(page_url):
                         browser_result = self._request_url_with_browser(page_url)
                         if browser_result:
                             html, status_code, status_text = browser_result
@@ -892,7 +898,7 @@ class UrlListCrawler(BaseCrawler):
                         return None
             if status_code >= 400 or self._contains_blocked_sign(html, page_url):
                 failure_reason = self._topology_fetch_failure_reason(page_url, html, status_code, status_text)
-                if self._should_retry_browser_for_fetch_failure(page_url):
+                if not request_is_post and self._should_retry_browser_for_fetch_failure(page_url):
                     browser_result = self._request_url_with_browser(page_url)
                     if browser_result:
                         html, status_code, status_text = browser_result

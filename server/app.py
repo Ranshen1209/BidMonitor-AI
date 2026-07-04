@@ -331,12 +331,13 @@ def is_stale_builtin_path(path: Any, filename: str) -> bool:
     if not path:
         return False
     normalized = os.path.normpath(str(path)).replace('\\', '/')
-    if os.path.exists(normalized):
+    current_builtin = os.path.normpath(os.path.join(BASE_DIR, 'server', filename)).replace('\\', '/')
+    if normalized == current_builtin:
         return False
     if os.path.basename(normalized) != filename:
         return False
-    parts = set(normalized.split('/'))
-    return 'BidMonitor-AI' in parts or 'server' in parts
+    parts = normalized.split('/')
+    return 'BidMonitor-AI' in parts and 'server' in parts
 
 def normalize_config(config: Dict[str, Any]) -> Dict[str, Any]:
     """补齐旧配置缺少的新字段，不覆盖用户已有值。"""

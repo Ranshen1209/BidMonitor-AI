@@ -162,18 +162,22 @@ class ServerConfigDefaultsTests(unittest.TestCase):
         self.assertEqual(normalized["csv_url_sources"][0]["source_type"], "json")
 
     def test_normalize_config_repairs_stale_project_builtin_paths(self):
-        normalized = app.normalize_config(
-            {
-                "site_topologies_path": "/Users/cervine/Documents/Github/BidMonitor-AI/server/site_topologies.json",
-                "csv_url_sources": [
-                    {
-                        "name": "招标URL源",
-                        "file_path": "/Users/cervine/Documents/Github/BidMonitor-AI/server/url_sources.json",
-                        "enabled": True,
-                    }
-                ],
-            }
-        )
+        stale_topologies_path = "/tmp/old/BidMonitor-AI/server/site_topologies.json"
+        stale_url_sources_path = "/tmp/old/BidMonitor-AI/server/url_sources.json"
+
+        with patch.object(app.os.path, "exists", return_value=True):
+            normalized = app.normalize_config(
+                {
+                    "site_topologies_path": stale_topologies_path,
+                    "csv_url_sources": [
+                        {
+                            "name": "招标URL源",
+                            "file_path": stale_url_sources_path,
+                            "enabled": True,
+                        }
+                    ],
+                }
+            )
 
         self.assertEqual(normalized["site_topologies_path"], app.DEFAULT_SITE_TOPOLOGIES_PATH)
         self.assertEqual(normalized["csv_url_sources"][0]["file_path"], app.DEFAULT_URL_SOURCES_PATH)

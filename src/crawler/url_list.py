@@ -141,6 +141,18 @@ DOWNLOAD_PATH_TERMS = [
     "export",
 ]
 
+NON_ANNOUNCEMENT_URL_PATTERNS = [
+    r"chinabidding\.com/.+[-/]News\.html(?:$|\?)",
+    r"plap\.mil\.cn/.+/(dishonesty|suspended|warning)\.html(?:$|\?)",
+    r"bidchance\.com/company[-/][^?#]+\.html(?:$|\?)",
+]
+
+PLATFORM_SHELL_TITLES = {
+    "国投集团电子采购平台",
+    "中国招标网",
+    "军队采购网",
+}
+
 FIELD_STOP_LABELS = [
     "采购项目名称",
     "招标项目名称",
@@ -1480,9 +1492,16 @@ class UrlListCrawler(BaseCrawler):
             return False
         return rule.get("page_type") in {"detail", "list", "search", "home"} or depth + 1 <= self.topology_max_depth
 
+    def _is_known_non_announcement_url(self, url: str) -> bool:
+        return self._matches_any_pattern(url, NON_ANNOUNCEMENT_URL_PATTERNS)
+
     def _is_admissible_detail_bid(self, bid: BidInfo, page_url: str) -> bool:
-        rule = self._classify_url(page_url)
         text = self._normalize_space(f"{bid.title} {bid.content}")
+        if self._is_known_non_announcement_url(page_url):
+            return False
+        if self._looks_like_platform_shell(bid.title, text):
+            return False
+        rule = self._classify_url(page_url)
         if self._contains_blocked_sign(text, page_url):
             return False
         if self._looks_like_navigation_page(text):
@@ -1521,6 +1540,28 @@ class UrlListCrawler(BaseCrawler):
                 "采购意向",
             ]
         )
+
+    def _looks_like_platform_shell(self, title: str, text: str) -> bool:
+        normalized_title = self._normalize_space(title)
+        if normalized_title not in PLATFORM_SHELL_TITLES:
+            return False
+        return not self._has_structured_procurement_field(text)
+
+    def _has_structured_procurement_field(self, text: str) -> bool:
+        structured_fields = [
+            "发布时间",
+            "发布日期",
+            "采购单位",
+            "采购人",
+            "招标人",
+            "项目编号",
+            "项目名称",
+            "预算金额",
+            "最高限价",
+            "投标截止",
+            "开标时间",
+        ]
+        return any(field in text for field in structured_fields)
 
     def _has_detail_evidence(self, text: str, allow_minimal: bool = False) -> bool:
         if not text:
@@ -1674,6 +1715,15 @@ class UrlListCrawler(BaseCrawler):
         elif host_key in {"neep.shop", "cg.95306.cn"}:
             handling = "js_rendered_limited"
             reason = "行业电子采购平台可能依赖前端渲染；静态可见内容优先，失败则诊断"
+
+        if self._is_known_non_announcement_url(url):
+            return {
+                "platform": platform,
+                "page_type": "home",
+                "handling": "non_announcement",
+                "reason": "已知非公告页面，跳过详情入库",
+                "topology_id": str(topology.get("id", "")) if topology else "",
+            }
 
         topology_page_type = self._classify_url_by_topology(url, topology)
         if topology_page_type:

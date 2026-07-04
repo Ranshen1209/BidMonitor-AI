@@ -98,6 +98,38 @@ class UrlListCrawlerTests(unittest.TestCase):
 
         self.assertEqual(crawler._classify_url("https://unknown.example.com/news-1.html")["page_type"], "detail")
 
+    def test_rejects_known_non_announcement_urls(self):
+        crawler = self.make_crawler_with_source_config("/tmp/missing.txt", None, {})
+        rejected = [
+            "https://www.chinabidding.com/infoDetail/123-News.html",
+            "https://www.plap.mil.cn/freecms/site/juncai/dishonesty.html?id=1",
+            "https://www.plap.mil.cn/freecms/site/juncai/suspended.html?id=1",
+            "https://www.plap.mil.cn/freecms/site/juncai/warning.html?id=1",
+            "https://chance.bidchance.com/company-123.html",
+        ]
+
+        for url in rejected:
+            with self.subTest(url=url):
+                self.assertTrue(crawler._is_known_non_announcement_url(url))
+
+    def test_rejects_platform_shell_title_without_structured_fields(self):
+        crawler = self.make_crawler_with_source_config("/tmp/missing.txt", None, {})
+        bid = type(
+            "Bid",
+            (),
+            {
+                "title": "国投集团电子采购平台",
+                "content": "国投集团电子采购平台 招标公告 项目 服务",
+            },
+        )()
+
+        self.assertFalse(
+            crawler._is_admissible_detail_bid(
+                bid,
+                "https://www.sdicc.com.cn/cgxx/ggDetail?gcGuid=gc&ggGuid=gg",
+            )
+        )
+
     def test_hash_fragment_login_url_classifies_as_login_and_requires_login_on_topology_host(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             urls_path = os.path.join(tmpdir, "urls.txt")
@@ -1925,14 +1957,30 @@ class UrlListCrawlerTests(unittest.TestCase):
             "https://www.sdicc.com.cn/cgxx/ggDetail?"
             "gcGuid=da97f2f1-64ca-4222-9d50-b976b16dbd2b&ggGuid=76cdd52c-8d91-4901-9a83-d28475fc5a6d"
         )
-        mock_request_url.return_value = (
-            "<html><head><title>国投集团电子采购平台</title></head><body>"
-            "<header><a href='/login'><span>用户登录</span></a></header>"
-            f"<main><a href='{detail_url}'>智能化工程招标公告</a><span>2026-07-01</span></main>"
-            "</body></html>",
-            200,
-            "OK",
-        )
+
+        def fake_request(url):
+            if url == "https://www.sdicc.com.cn/":
+                return (
+                    "<html><head><title>国投集团电子采购平台</title></head><body>"
+                    "<header><a href='/login'><span>用户登录</span></a></header>"
+                    f"<main><a href='{detail_url}'>智能化工程招标公告</a><span>2026-07-01</span></main>"
+                    "</body></html>",
+                    200,
+                    "OK",
+                )
+            if url == detail_url:
+                return (
+                    "<html><body><h1>智能化工程招标公告</h1>"
+                    "<p>发布时间：2026-07-01</p>"
+                    "<p>招标人：国投测试单位</p>"
+                    "<p>项目编号：GT-2026-001</p>"
+                    "<p>公告正文：本项目采购智能化工程服务。</p></body></html>",
+                    200,
+                    "OK",
+                )
+            raise AssertionError(f"unexpected url {url}")
+
+        mock_request_url.side_effect = fake_request
 
         with tempfile.TemporaryDirectory() as tmpdir:
             path = os.path.join(tmpdir, "urls.txt")

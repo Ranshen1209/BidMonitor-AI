@@ -476,8 +476,10 @@ class MonitorCore:
 
                     ai_relevant = True
                     ai_reason = ""
+                    ai_checked = False
                     if self.ai_guard:
                         ai_relevant, ai_reason = self.ai_guard.check_relevance(bid.title, bid.content or "")
+                        ai_checked = True
                         ai_bucket = ai_stats['ai_approved'] if ai_relevant else ai_stats['ai_rejected']
                         ai_bucket.append({
                             'title': bid.title,
@@ -491,7 +493,7 @@ class MonitorCore:
                             }
                             self.storage.update_review([result_id], review_update)
 
-                    should_notify = self._should_notify_bid(result.matched, ai_relevant, ai_reason)
+                    should_notify = self._should_notify_bid(result.matched, ai_relevant, ai_reason, ai_checked=ai_checked)
                     if result_id and not should_notify:
                         self.storage.mark_notified(bid)
                     if result_id and should_notify:
@@ -568,14 +570,15 @@ class MonitorCore:
             'ai_stats': ai_stats
         }
     
-    def _should_notify_bid(self, keyword_matched: bool, ai_relevant: bool, ai_reason: str) -> bool:
+    def _should_notify_bid(self, keyword_matched: bool, ai_relevant: bool, ai_reason: str, ai_checked: bool = False) -> bool:
         policy = (self.config.get("crawler", {}) or {}).get("notification_policy", "strict_keyword_and_ai")
         ai_unknown = str(ai_reason or "").startswith("AI请求异常") or str(ai_reason or "").startswith("AI结果未知")
+        ai_can_notify = ai_checked and ai_relevant and not ai_unknown
         if policy == "keyword_or_ai":
-            return (keyword_matched or ai_relevant) and not ai_unknown
+            return keyword_matched or ai_can_notify
         if policy == "keyword_only_on_ai_error":
             return keyword_matched if ai_unknown else keyword_matched and ai_relevant
-        return keyword_matched and ai_relevant and not ai_unknown
+        return keyword_matched and (ai_relevant if ai_checked else True) and not ai_unknown
 
     def _send_notifications(self, bids: List[BidInfo]):
         """发送通知"""

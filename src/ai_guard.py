@@ -130,10 +130,23 @@ class AIGuard:
         if any(re.search(pattern, lower) for pattern in negative_patterns):
             return False
 
+        unknown_patterns = [
+            r"无法判断",
+            r"不能判断",
+            r"无法确定",
+            r"不能确定",
+            r"不确定",
+            r"未知",
+            r"无法识别",
+        ]
+        if any(re.search(pattern, lower) for pattern in unknown_patterns):
+            return None
+
         positive_patterns = [
             r"\brelevant\s*[:：]\s*true\b",
             r"\btrue\b",
-            r"相关",
+            r"相关\s*[:：]",
+            r"判定.*相关",
             r"符合",
             r"建议跟进",
             r"值得",

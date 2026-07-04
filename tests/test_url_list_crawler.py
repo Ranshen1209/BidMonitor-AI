@@ -846,11 +846,68 @@ class UrlListCrawlerTests(unittest.TestCase):
             self.assertEqual(bids[0].url, "https://portal.example.com/detail/42")
 
     @patch.object(UrlListCrawler, "_request_url")
+    def test_topology_seed_list_cannot_outrank_visible_detail_link(self, mock_request_url):
+        requested = []
+
+        def fake_request(url):
+            requested.append(url)
+            if url == "https://portal.example.com/":
+                return (
+                    "<html><body>"
+                    "<a href='/notice/1.html'>查看详情</a>"
+                    "</body></html>",
+                    200,
+                    "OK",
+                )
+            if url == "https://portal.example.com/notice/1.html":
+                return (
+                    "<html><body><h1>上海安防工程公开招标公告</h1>"
+                    "<p>发布时间：2026-07-02</p><p>采购单位：上海测试单位</p>"
+                    "<p>公告正文：本项目采购安防监控系统。</p></body></html>",
+                    200,
+                    "OK",
+                )
+            raise AssertionError(f"unexpected url {url}")
+
+        mock_request_url.side_effect = fake_request
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            urls_path = os.path.join(tmpdir, "urls.txt")
+            diagnostics_path = os.path.join(tmpdir, "diagnostics.jsonl")
+            with open(urls_path, "w", encoding="utf-8") as f:
+                f.write("https://portal.example.com/\n")
+            topology_path = self.write_topologies(
+                tmpdir,
+                [
+                    {
+                        "id": "portal",
+                        "name": "示例公告门户",
+                        "entry_url": "https://portal.example.com/",
+                        "seed_urls": ["/notices/"],
+                        "detail_url_regex": [r"/notice/\d+\.html$"],
+                        "list_url_regex": [r"/notices/?$"],
+                    }
+                ],
+            )
+
+            crawler = self.make_crawler_with_source_config(
+                urls_path,
+                diagnostics_path,
+                {"topology_max_depth": 1, "max_follow_links_per_page": 1},
+                config={"site_topologies_path": topology_path},
+            )
+            bids = crawler.crawl()
+
+            self.assertEqual(len(bids), 1)
+            self.assertEqual(bids[0].url, "https://portal.example.com/notice/1.html")
+            self.assertNotIn("https://portal.example.com/notices/", requested)
+
+    @patch.object(UrlListCrawler, "_request_url")
     def test_topology_seed_urls_are_prioritized_over_noisy_entry_links(self, mock_request_url):
         def fake_request(url):
             if url == "https://portal.example.com/":
                 noisy_links = "".join(
-                    f"<a href='/category/{index}'>安防工程公告栏目 {index}</a>" for index in range(5)
+                    f"<a href='/category/{index}'>政策法规新闻栏目 {index}</a>" for index in range(5)
                 )
                 return (f"<html><body>{noisy_links}</body></html>", 200, "OK")
             if url == "https://portal.example.com/notices/":

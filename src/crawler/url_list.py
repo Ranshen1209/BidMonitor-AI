@@ -934,8 +934,6 @@ class UrlListCrawler(BaseCrawler):
         title = link.get("title", "")
         rule = self._classify_url(url)
         score = 0
-        if link.get("_topology_seed") == "1":
-            score += 100
         if rule.get("page_type") == "detail":
             score += 100
         elif rule.get("page_type") in {"list", "search"}:
@@ -1055,7 +1053,7 @@ class UrlListCrawler(BaseCrawler):
             url = urljoin(seed_url, str(raw_url))
             if url.rstrip("/") == seed_url.rstrip("/"):
                 continue
-            links.append({"title": str(raw_url), "url": url, "_topology_seed": "1"})
+            links.append({"title": str(raw_url), "url": url})
         return links
 
     def _read_txt_urls(self) -> List[str]:

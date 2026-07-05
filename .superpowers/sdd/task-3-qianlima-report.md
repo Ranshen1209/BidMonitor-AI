@@ -218,3 +218,45 @@
 ### Concerns
 
 - This fix is intentionally narrow: it only forces HTTP-only behavior for the adapter-built crawler during the empty/no-error Qianlima VIP fallback path, so other sites and normal browser-assisted diagnostics remain unchanged.
+
+## HTTP-Only JSON Helper Hardening
+
+### RED Evidence
+
+- `.venv/bin/python -m pytest tests/test_source_adapter.py::TopologySourceAdapterTests::test_collect_qianlima_uses_vip_search_then_enriches_details tests/test_source_adapter.py::TopologySourceAdapterTests::test_build_crawler_get_json_uses_http_without_browser_auto tests/test_source_adapter.py::TopologySourceAdapterTests::test_build_crawler_post_json_returns_sanitized_error_on_request_exception -q`
+  - `..F [100%]`
+  - `test_build_crawler_post_json_returns_sanitized_error_on_request_exception`
+    - Failed with `requests.exceptions.RequestException: request failed for payload=secret`
+    - Showed `post_json()` was still letting request exceptions escape instead of returning a sanitized non-2xx tuple.
+
+### GREEN Evidence
+
+- `tests/test_source_adapter.py`
+  - Strengthened `test_collect_qianlima_uses_vip_search_then_enriches_details` with browser mode enabled and `_request_url_with_browser()` patched to fail, proving VIP detail enrichment still goes through `_request_url()` and stays HTTP-only.
+  - Added `test_build_crawler_get_json_uses_http_without_browser_auto`, patching `_request_url_with_browser()` to fail and verifying `get_json()` uses `_request_http("GET", url)` directly and parses JSON successfully.
+  - Added `test_build_crawler_post_json_returns_sanitized_error_on_request_exception`, verifying `post_json()` returns `({}, 599, "RequestException: request failed")` without leaking cookie or payload values.
+- `src/crawler/source_adapter.py`
+  - `_build_crawler().get_json()` now calls `crawler._request_http("GET", url)` directly, making the helper explicitly HTTP API oriented.
+  - `get_json()` and `post_json()` now catch request/transport exceptions and return sanitized `599` tuples instead of raising, while preserving existing invalid-JSON fallback behavior.
+  - Exception status text now strips likely sensitive request content such as cookies, payloads, tokens, or authorization fragments.
+
+### Test Outputs
+
+- `.venv/bin/python -m pytest tests/test_source_adapter.py::TopologySourceAdapterTests::test_collect_qianlima_uses_vip_search_then_enriches_details tests/test_source_adapter.py::TopologySourceAdapterTests::test_build_crawler_get_json_uses_http_without_browser_auto tests/test_source_adapter.py::TopologySourceAdapterTests::test_build_crawler_post_json_returns_sanitized_error_on_request_exception -q`
+  - RED: `..F [100%]` (`requests.exceptions.RequestException: request failed for payload=secret`)
+  - GREEN: `3 passed in 0.13s`
+  - Final verification rerun: `3 passed in 0.12s`
+- `.venv/bin/python -m pytest tests/test_source_adapter.py -q`
+  - `43 passed, 11 subtests passed in 0.21s`
+- `git diff --check`
+  - clean
+
+### Files Changed
+
+- `src/crawler/source_adapter.py`
+- `tests/test_source_adapter.py`
+- `.superpowers/sdd/task-3-qianlima-report.md`
+
+### Concerns
+
+- `get_json()` exception hardening is covered indirectly through the new explicit `_request_http("GET", ...)` helper path, but this pass only adds a focused transport-exception regression for `post_json()` because that was the user-requested non-2xx tuple test.

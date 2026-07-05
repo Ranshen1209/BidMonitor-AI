@@ -430,6 +430,16 @@ class TopologySourceAdapter:
             "domain_delay": domain_delay,
         }
         crawler = UrlListCrawler(config, source_config)
+
+        def sanitized_exception_text(exc: Exception) -> str:
+            message = str(exc).strip()
+            lower_message = message.lower()
+            if not message:
+                return exc.__class__.__name__
+            if any(marker in lower_message for marker in ("cookie", "payload", "token", "authorization", "session=")):
+                return f"{exc.__class__.__name__}: request failed"
+            return f"{exc.__class__.__name__}: {message}"
+
         def post_json(url: str, payload: dict[str, Any]) -> tuple[dict[str, Any], int, str]:
             headers = crawler._get_headers()
             headers["Content-Type"] = "application/json"
@@ -437,14 +447,17 @@ class TopologySourceAdapter:
             if cookie:
                 headers["Cookie"] = cookie
             crawler._emit_info(f"[URL请求] {crawler.name}: HTTP POST JSON {crawler._short_url(url)}")
-            response = crawler.session.post(
-                url,
-                json=payload,
-                headers=headers,
-                timeout=crawler.timeout,
-                verify=False,
-                allow_redirects=True,
-            )
+            try:
+                response = crawler.session.post(
+                    url,
+                    json=payload,
+                    headers=headers,
+                    timeout=crawler.timeout,
+                    verify=False,
+                    allow_redirects=True,
+                )
+            except (url_list_requests.RequestException, Exception) as exc:
+                return {}, 599, sanitized_exception_text(exc)
             response.encoding = response.apparent_encoding or response.encoding or "utf-8"
             try:
                 return json.loads(response.text or "{}"), response.status_code, response.reason
@@ -452,7 +465,10 @@ class TopologySourceAdapter:
                 return {}, response.status_code, response.reason
 
         def get_json(url: str) -> tuple[dict[str, Any], int, str]:
-            html, status_code, status_text = crawler._request_url(url)
+            try:
+                html, status_code, status_text = crawler._request_http("GET", url)
+            except (url_list_requests.RequestException, Exception) as exc:
+                return {}, 599, sanitized_exception_text(exc)
             try:
                 return json.loads(html or "{}"), status_code, status_text
             except (TypeError, ValueError):

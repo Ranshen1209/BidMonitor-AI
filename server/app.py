@@ -324,6 +324,19 @@ AUTH_DB_FILE = os.environ.get("BIDMONITOR_AUTH_DB", os.path.join(BASE_DIR, "data
 SESSION_COOKIE_NAME = "bidmonitor_session"
 COOKIE_SECURE = os.environ.get("BIDMONITOR_COOKIE_SECURE", "").lower() in ("1", "true", "yes")
 auth_storage = AuthStorage(AUTH_DB_FILE)
+QIANLIMA_CRAWLER_CONFIG_KEYS = (
+    'qianlima_vip_search_enabled',
+    'qianlima_backfill_enabled',
+    'qianlima_num_per_page',
+    'qianlima_max_pages_per_keyword',
+    'qianlima_backfill_max_pages_per_keyword',
+    'qianlima_stop_after_duplicate_pages',
+    'qianlima_max_results_per_run',
+    'qianlima_time_type',
+    'qianlima_sort_type',
+    'qianlima_search_endpoint',
+    'qianlima_member_info_endpoint',
+)
 
 def is_legacy_url_list_key(key: Any) -> bool:
     return str(key).startswith('url_list_')
@@ -377,6 +390,7 @@ def normalize_config(config: Dict[str, Any]) -> Dict[str, Any]:
         if str(source.get('file_path', '')).endswith('.json'):
             source.setdefault('source_type', 'json')
     config.setdefault('qianlima_vip_search_enabled', True)
+    config.setdefault('qianlima_backfill_enabled', False)
     config.setdefault('qianlima_num_per_page', 20)
     config.setdefault('qianlima_max_pages_per_keyword', 30)
     config.setdefault('qianlima_backfill_max_pages_per_keyword', 100)
@@ -531,6 +545,7 @@ class ConfigModel(BaseModel):
     browser_backend: Optional[Dict[str, Any]] = None
     site_topologies_path: Optional[str] = None
     qianlima_vip_search_enabled: Optional[bool] = None
+    qianlima_backfill_enabled: Optional[bool] = None
     qianlima_num_per_page: Optional[int] = None
     qianlima_max_pages_per_keyword: Optional[int] = None
     qianlima_backfill_max_pages_per_keyword: Optional[int] = None
@@ -694,6 +709,20 @@ def build_qianlima_membership_crawler(config: Dict[str, Any]) -> UrlListCrawler:
         crawler.get_json = get_json
     return crawler
 
+def build_crawler_overrides_from_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    overrides = {
+        'enabled_sites': config.get('enabled_sites', []),
+        'use_selenium': config.get('use_selenium', False),
+        'browser_backend': config.get('browser_backend', {}),
+        'site_topologies_path': config.get('site_topologies_path', DEFAULT_SITE_TOPOLOGIES_PATH),
+        'csv_url_sources': config.get('csv_url_sources', []),
+        'site_metadata': config.get('site_metadata', {}),
+    }
+    for key in QIANLIMA_CRAWLER_CONFIG_KEYS:
+        if key in config:
+            overrides[key] = config[key]
+    return overrides
+
 # 定时任务：执行监控
 async def run_monitor_task():
     """执行一次监控任务"""
@@ -735,14 +764,7 @@ async def run_monitor_task():
             must_contain_keywords=must_contain,
             log_callback=app_state.add_log,
             ai_config=ai_config,
-            crawler_overrides={
-                'enabled_sites': config.get('enabled_sites', []),
-                'use_selenium': config.get('use_selenium', False),
-                'browser_backend': config.get('browser_backend', {}),
-                'site_topologies_path': config.get('site_topologies_path', DEFAULT_SITE_TOPOLOGIES_PATH),
-                'csv_url_sources': config.get('csv_url_sources', []),
-                'site_metadata': config.get('site_metadata', {}),
-            }
+            crawler_overrides=build_crawler_overrides_from_config(config),
         )
         
         if config.get('use_selenium'):

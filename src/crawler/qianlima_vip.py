@@ -190,6 +190,21 @@ def _safe_int(value: Any, default: int) -> int:
         return default
 
 
+def _is_backfill_enabled(config: Mapping[str, Any]) -> bool:
+    value = config.get("qianlima_backfill_enabled")
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "on")
+    return False
+
+
+def _max_pages_for_run(config: Mapping[str, Any]) -> int:
+    if _is_backfill_enabled(config):
+        return _safe_int(config.get("qianlima_backfill_max_pages_per_keyword"), 100)
+    return _safe_int(config.get("qianlima_max_pages_per_keyword"), 30)
+
+
 def _sync_result_counts(result: CrawlResult) -> CrawlResult:
     result.parsed_count = len(result.notices)
     return result
@@ -209,7 +224,7 @@ class QianlimaVipSearchClient:
         self.notice_exists = notice_exists or (lambda notice: False)
         self.search_endpoint = self.config.get("qianlima_search_endpoint") or QIANLIMA_SEARCH_ENDPOINT
         self.member_info_endpoint = self.config.get("qianlima_member_info_endpoint") or QIANLIMA_MEMBER_INFO_ENDPOINT
-        self.max_pages = _safe_int(self.config.get("qianlima_max_pages_per_keyword"), 30)
+        self.max_pages = _max_pages_for_run(self.config)
         self.duplicate_page_limit = _safe_int(self.config.get("qianlima_stop_after_duplicate_pages"), 3)
         self.max_results = _safe_int(self.config.get("qianlima_max_results_per_run"), 1000)
 

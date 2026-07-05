@@ -777,7 +777,7 @@ function renderQianlimaMembership(site) {
         return `<div class="site-membership is-warning">会员状态：${escapeHtml(reason)}</div>`;
     }
     const level = qianlimaMembership.member_level || '会员';
-    const expire = qianlimaMembership.expire_date ? `，到期：${qianlimaMembership.expire_date}` : '';
+    const expire = qianlimaMembership.show_expire_date && qianlimaMembership.expire_date ? `，到期：${qianlimaMembership.expire_date}` : '';
     const expiredClass = qianlimaMembership.is_expired ? ' is-warning' : '';
     return `<div class="site-membership${expiredClass}">会员状态：${escapeHtml(level + expire)}</div>`;
 }

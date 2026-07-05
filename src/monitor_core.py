@@ -174,6 +174,17 @@ class MonitorCore:
             'enable_legacy_builtin_crawlers',
             'notification_policy',
             'enrich_only_candidate_results',
+            'qianlima_vip_search_enabled',
+            'qianlima_backfill_enabled',
+            'qianlima_num_per_page',
+            'qianlima_max_pages_per_keyword',
+            'qianlima_backfill_max_pages_per_keyword',
+            'qianlima_stop_after_duplicate_pages',
+            'qianlima_max_results_per_run',
+            'qianlima_time_type',
+            'qianlima_sort_type',
+            'qianlima_search_endpoint',
+            'qianlima_member_info_endpoint',
         ]:
             if key in self.crawler_overrides:
                 crawler_config[key] = self.crawler_overrides[key]

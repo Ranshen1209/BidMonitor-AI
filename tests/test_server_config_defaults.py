@@ -165,6 +165,7 @@ class ServerConfigDefaultsTests(unittest.TestCase):
         config = app.normalize_config({"csv_url_sources": [{"file_path": app.DEFAULT_URL_SOURCES_PATH}]})
 
         self.assertTrue(config["qianlima_vip_search_enabled"])
+        self.assertFalse(config["qianlima_backfill_enabled"])
         self.assertEqual(config["qianlima_num_per_page"], 20)
         self.assertEqual(config["qianlima_max_pages_per_keyword"], 30)
         self.assertEqual(config["qianlima_backfill_max_pages_per_keyword"], 100)
@@ -172,6 +173,25 @@ class ServerConfigDefaultsTests(unittest.TestCase):
         self.assertEqual(config["qianlima_max_results_per_run"], 1000)
         self.assertEqual(config["qianlima_time_type"], 8)
         self.assertEqual(config["qianlima_sort_type"], 6)
+
+    def test_qianlima_options_flow_into_monitor_crawler_overrides(self):
+        config = app.normalize_config(
+            {
+                "enabled_sites": ["qianlima"],
+                "csv_url_sources": [{"file_path": app.DEFAULT_URL_SOURCES_PATH}],
+                "qianlima_backfill_enabled": True,
+                "qianlima_backfill_max_pages_per_keyword": 100,
+                "qianlima_max_pages_per_keyword": 30,
+                "qianlima_stop_after_duplicate_pages": 3,
+            }
+        )
+
+        overrides = app.build_crawler_overrides_from_config(config)
+
+        self.assertTrue(overrides["qianlima_backfill_enabled"])
+        self.assertEqual(overrides["qianlima_backfill_max_pages_per_keyword"], 100)
+        self.assertEqual(overrides["qianlima_max_pages_per_keyword"], 30)
+        self.assertEqual(overrides["qianlima_stop_after_duplicate_pages"], 3)
 
     def test_normalize_config_repairs_stale_project_builtin_paths(self):
         stale_topologies_path = "/tmp/old/BidMonitor-AI/server/site_topologies.json"

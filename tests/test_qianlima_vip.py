@@ -210,6 +210,44 @@ class QianlimaVipClientTests(unittest.TestCase):
         post_pages = [call[2]["currentPage"] for call in crawler.calls if call[0] == "POST"]
         self.assertEqual(post_pages, [1, 2])
 
+    def test_collect_backfill_mode_uses_backfill_page_limit(self):
+        from crawler.qianlima_vip import QianlimaVipSearchClient
+
+        crawler = FakeQianlimaCrawler(
+            {
+                page: {
+                    "code": 200,
+                    "data": {
+                        "data": [
+                            {
+                                "contentid": page,
+                                "progName": f"上海会议系统招标公告{page}",
+                                "updateTime": "2026-07-05",
+                                "url": f"http://www.qianlima.com/zb/detail/20260705_{page}.html",
+                            }
+                        ]
+                    },
+                }
+                for page in range(1, 4)
+            }
+        )
+        client = QianlimaVipSearchClient(
+            crawler,
+            self.make_source(),
+            {
+                "qianlima_max_pages_per_keyword": 1,
+                "qianlima_backfill_max_pages_per_keyword": 3,
+                "qianlima_backfill_enabled": True,
+                "qianlima_max_results_per_run": 100,
+            },
+        )
+
+        result = client.collect(["会议"])
+
+        self.assertEqual([notice.source_item_id for notice in result.notices], ["1", "2", "3"])
+        post_pages = [call[2]["currentPage"] for call in crawler.calls if call[0] == "POST"]
+        self.assertEqual(post_pages, [1, 2, 3])
+
     def test_collect_stops_after_duplicate_only_pages(self):
         from crawler.qianlima_vip import QianlimaVipSearchClient
 

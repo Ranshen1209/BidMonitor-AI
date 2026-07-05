@@ -39,3 +39,4 @@ Baseline: 319 passed, 55 warnings, 82 subtests passed
 - Task 3: complete (commits 3dbb018..5cf1af7, review clean after fixes: fallback accounting, HTTP-only fallback, raw payload shape, VIP endpoint traversal guard, strict JSON helper exception status text)
 - Task 4: complete (commits 509bcaf..cd72997, review clean; backend membership endpoint and Qianlima config defaults)
 - Task 5: complete (commits 6621493..dc99e0e, review clean; frontend membership status line)
+- Final review fixes: complete (commit 83ebd64; backfill mode uses backfill page limit, Qianlima config flows into crawler overrides, membership expiry respects show_expire_date; full suite 350 passed)

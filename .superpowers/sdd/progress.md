@@ -28,3 +28,9 @@ Plan: docs/superpowers/plans/2026-07-02-results-center-ai-extraction.md
 - Task 5: complete (commits c5fa7ba..2f418fd plus frontend cleanup in c5fa7ba..9c7f491, review clean; server/app custom-sites routes/config verified absent by controller)
 - Final review: fixed blocking findings in 87689f8 (contacts secret masking, AI test endpoint, detail-fetch failure status, structured recommendation serialization, q search before pagination, bulk missing-ID atomicity, legacy chat endpoint inference)
 - Integration tests: passed locally after final fix (51 results/API/AI/storage/monitor tests; 27 URL/browser tests; 23 static frontend tests; 6 auth tests)
+
+# SDD Progress: Qianlima VIP Search
+Plan: docs/superpowers/plans/2026-07-05-qianlima-vip-search.md
+Branch: codex/qianlima-vip-search
+Test runner: .venv/bin/python -m pytest
+Baseline: 319 passed, 55 warnings, 82 subtests passed

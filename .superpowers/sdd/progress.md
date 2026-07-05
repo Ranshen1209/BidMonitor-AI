@@ -34,3 +34,4 @@ Plan: docs/superpowers/plans/2026-07-05-qianlima-vip-search.md
 Branch: codex/qianlima-vip-search
 Test runner: .venv/bin/python -m pytest
 Baseline: 319 passed, 55 warnings, 82 subtests passed
+- Task 1: complete (commits b47153a..7079630, review clean; controller verified 5 qianlima tests and full suite 324 passed, 55 warnings)

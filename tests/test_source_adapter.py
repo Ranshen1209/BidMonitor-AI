@@ -1138,6 +1138,57 @@ class TopologySourceAdapterTests(unittest.TestCase):
         self.assertNotIn("should-not-leak", status_text)
         self.assertNotIn("SESSION=secret", status_text)
 
+    def test_build_crawler_post_json_never_returns_sensitive_exception_text(self):
+        source = Source(
+            id="qianlima",
+            name="千里马",
+            url="https://www.qianlima.com/",
+            auth_cookies=[{"domain": "qianlima.com", "cookie": "SESSION=secret", "enabled": True}],
+        )
+        adapter = TopologySourceAdapter({"request_delay": 0, "domain_delay": 0})
+        crawler = adapter._build_crawler(source)
+        crawler.session = Mock()
+        crawler.session.post.side_effect = requests.RequestException(
+            "transport failed body=secret headers=X-Trace: secret Bearer abc"
+        )
+
+        result_payload, status_code, status_text = crawler.post_json(
+            "https://search.vip.qianlima.com/rest/service/website/search/solr",
+            {"keywords": "会议"},
+        )
+
+        self.assertEqual(result_payload, {})
+        self.assertEqual(status_code, 599)
+        self.assertEqual(status_text, "RequestException: request failed")
+        self.assertNotIn("body=secret", status_text)
+        self.assertNotIn("Bearer abc", status_text)
+        self.assertNotIn("headers=", status_text)
+
+    def test_build_crawler_get_json_never_returns_sensitive_exception_text(self):
+        source = Source(
+            id="qianlima",
+            name="千里马",
+            url="https://www.qianlima.com/",
+        )
+        adapter = TopologySourceAdapter({"request_delay": 0, "domain_delay": 0})
+        crawler = adapter._build_crawler(source)
+        crawler._request_http = Mock(
+            side_effect=requests.RequestException(
+                "transport failed body=secret headers=X-Trace: secret Bearer abc"
+            )
+        )
+
+        result_payload, status_code, status_text = crawler.get_json(
+            "https://search.vip.qianlima.com/rest/service/website/search/solr"
+        )
+
+        self.assertEqual(result_payload, {})
+        self.assertEqual(status_code, 599)
+        self.assertEqual(status_text, "RequestException: request failed")
+        self.assertNotIn("body=secret", status_text)
+        self.assertNotIn("Bearer abc", status_text)
+        self.assertNotIn("headers=", status_text)
+
     @patch("crawler.url_list.UrlListCrawler._request_url")
     def test_collect_preserves_missing_detail_publish_date_as_empty(self, mock_request_url):
         def fake_request(url):

@@ -260,3 +260,42 @@
 ### Concerns
 
 - `get_json()` exception hardening is covered indirectly through the new explicit `_request_http("GET", ...)` helper path, but this pass only adds a focused transport-exception regression for `post_json()` because that was the user-requested non-2xx tuple test.
+
+## Strict JSON Helper Exception Status Text
+
+### RED Evidence
+
+- `.venv/bin/python -m pytest tests/test_source_adapter.py -q -k "sensitive_exception_text or sanitized_error"`
+  - `FF. [100%]`
+  - `test_build_crawler_post_json_never_returns_sensitive_exception_text`
+    - Failed because `status_text` included `body=secret`, `headers=...`, and `Bearer abc`.
+  - `test_build_crawler_get_json_never_returns_sensitive_exception_text`
+    - Failed for the same leaked exception text shape through the HTTP-only GET helper.
+
+### GREEN Evidence
+
+- `tests/test_source_adapter.py`
+  - Added focused regressions for `post_json()` and `get_json()` using sensitive-looking exception text that does not depend on the previous marker list.
+  - Both helpers now assert the exact safe status text `RequestException: request failed`.
+- `src/crawler/source_adapter.py`
+  - Replaced heuristic exception redaction with a fixed safe string that preserves only the exception class name and never includes `str(exc)`.
+
+### Test Outputs
+
+- `.venv/bin/python -m pytest tests/test_source_adapter.py -q -k "sensitive_exception_text or sanitized_error"`
+  - RED: `2 failed, 1 passed, 42 deselected in 0.16s`
+  - GREEN: `3 passed, 42 deselected in 0.13s`
+- `.venv/bin/python -m pytest tests/test_qianlima_vip.py tests/test_url_list_crawler.py -q`
+  - `90 passed, 2 warnings, 33 subtests passed in 1.17s`
+- `.venv/bin/python -m pytest tests/test_source_adapter.py -q`
+  - `45 passed, 11 subtests passed in 0.22s`
+
+### Files Changed
+
+- `src/crawler/source_adapter.py`
+- `tests/test_source_adapter.py`
+- `.superpowers/sdd/task-3-qianlima-report.md`
+
+### Concerns
+
+- None.

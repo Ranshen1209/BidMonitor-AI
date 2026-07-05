@@ -432,13 +432,7 @@ class TopologySourceAdapter:
         crawler = UrlListCrawler(config, source_config)
 
         def sanitized_exception_text(exc: Exception) -> str:
-            message = str(exc).strip()
-            lower_message = message.lower()
-            if not message:
-                return exc.__class__.__name__
-            if any(marker in lower_message for marker in ("cookie", "payload", "token", "authorization", "session=")):
-                return f"{exc.__class__.__name__}: request failed"
-            return f"{exc.__class__.__name__}: {message}"
+            return f"{exc.__class__.__name__}: request failed"
 
         def post_json(url: str, payload: dict[str, Any]) -> tuple[dict[str, Any], int, str]:
             headers = crawler._get_headers()

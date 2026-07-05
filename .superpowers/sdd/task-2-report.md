@@ -25,3 +25,28 @@ Files Changed:
 
 Concerns:
 - None.
+
+## Review Fix: Max Results and Candidate Counting
+
+Fix summary:
+- Added a regression test proving `collect()` stops within a page when `qianlima_max_results_per_run` is reached.
+- Changed `collect()` to emit a `max-results` diagnostic and return immediately after appending the notice that reaches the cap.
+- Moved `candidate_count` to count every valid mapped notice before duplicate filtering, matching existing crawler semantics.
+- Updated the duplicate-only page test to assert mapped duplicate candidates are counted.
+
+RED/GREEN evidence for the new cap test:
+- RED: `.venv/bin/python -m pytest tests/test_qianlima_vip.py::QianlimaVipClientTests::test_collect_stops_inside_page_when_max_results_reached tests/test_qianlima_vip.py::QianlimaVipClientTests::test_collect_stops_after_duplicate_only_pages -q`
+  - Result: 2 failed.
+  - Cap failure: expected `["21"]`, got `["21", "22"]`.
+  - Candidate-count failure: expected `2`, got `0`.
+- GREEN focused: `.venv/bin/python -m pytest tests/test_qianlima_vip.py::QianlimaVipClientTests::test_collect_stops_inside_page_when_max_results_reached tests/test_qianlima_vip.py::QianlimaVipClientTests::test_collect_stops_after_duplicate_only_pages -q`
+  - Result: `2 passed in 0.02s`.
+
+Test commands and outputs:
+- `.venv/bin/python -m pytest tests/test_qianlima_vip.py -q`
+  - Result: `9 passed in 0.02s`.
+
+Files changed:
+- `src/crawler/qianlima_vip.py`
+- `tests/test_qianlima_vip.py`
+- `.superpowers/sdd/task-2-report.md`

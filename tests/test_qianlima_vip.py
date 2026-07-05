@@ -226,9 +226,51 @@ class QianlimaVipClientTests(unittest.TestCase):
         result = client.collect(["会议"])
 
         self.assertEqual(result.notices, [])
+        self.assertEqual(result.candidate_count, 2)
         post_pages = [call[2]["currentPage"] for call in crawler.calls if call[0] == "POST"]
         self.assertEqual(post_pages, [1, 2])
         self.assertIn("duplicate-only", result.diagnostics[-1]["reason"])
+
+    def test_collect_stops_inside_page_when_max_results_reached(self):
+        from crawler.qianlima_vip import QianlimaVipSearchClient
+
+        crawler = FakeQianlimaCrawler(
+            {
+                1: {
+                    "code": 200,
+                    "data": {
+                        "data": [
+                            {
+                                "contentid": 21,
+                                "progName": "上海会议系统招标公告",
+                                "updateTime": "2026-07-05",
+                                "url": "http://www.qianlima.com/zb/detail/20260705_21.html",
+                            },
+                            {
+                                "contentid": 22,
+                                "progName": "上海会议系统中标公告",
+                                "updateTime": "2026-07-05",
+                                "url": "http://www.qianlima.com/zb/detail/20260705_22.html",
+                            },
+                        ]
+                    },
+                },
+                2: {"code": 200, "data": {"data": []}},
+            }
+        )
+        client = QianlimaVipSearchClient(
+            crawler,
+            self.make_source(),
+            {"qianlima_max_pages_per_keyword": 5, "qianlima_max_results_per_run": 1},
+        )
+
+        result = client.collect(["会议"])
+
+        self.assertEqual([notice.source_item_id for notice in result.notices], ["21"])
+        self.assertEqual(result.candidate_count, 1)
+        post_pages = [call[2]["currentPage"] for call in crawler.calls if call[0] == "POST"]
+        self.assertEqual(post_pages, [1])
+        self.assertEqual(result.diagnostics[-1]["reason"], "max-results")
 
     def test_fetch_membership_status_uses_safe_parser(self):
         from crawler.qianlima_vip import QianlimaVipSearchClient

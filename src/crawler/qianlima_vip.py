@@ -207,6 +207,7 @@ class QianlimaVipSearchClient:
                     return result
                 if len(result.notices) >= self.max_results:
                     result.diagnostics.append({"status": "stopped", "reason": "max-results", "keyword": keyword})
+                    result.parsed_count = len(result.notices)
                     return result
                 payload = build_search_payload(keyword, page, self.config)
                 self.crawler._respect_rate_limit(self.search_endpoint)
@@ -236,6 +237,7 @@ class QianlimaVipSearchClient:
                     if notice is None:
                         result.skipped_count += 1
                         continue
+                    result.candidate_count += 1
                     key = notice.source_item_id or normalize_notice_url(notice.detail_url)
                     normalized_url = normalize_notice_url(notice.detail_url)
                     duplicate = bool(key and key in seen_keys)
@@ -249,8 +251,13 @@ class QianlimaVipSearchClient:
                     if normalized_url:
                         seen_keys.add(normalized_url)
                     result.notices.append(notice)
-                    result.candidate_count += 1
                     page_new_count += 1
+                    if len(result.notices) >= self.max_results:
+                        result.diagnostics.append(
+                            {"status": "stopped", "reason": "max-results", "keyword": keyword, "page": page}
+                        )
+                        result.parsed_count = len(result.notices)
+                        return result
                 if page_new_count == 0:
                     duplicate_pages += 1
                     if duplicate_pages >= self.duplicate_page_limit:

@@ -35,3 +35,4 @@ Branch: codex/qianlima-vip-search
 Test runner: .venv/bin/python -m pytest
 Baseline: 319 passed, 55 warnings, 82 subtests passed
 - Task 1: complete (commits b47153a..7079630, review clean; controller verified 5 qianlima tests and full suite 324 passed, 55 warnings)
+- Task 2: complete (commits f3657ae..aba3000, review clean after fixes: max-results cap, candidate counts, early-return counts, invalid-only pages, payload fallback; controller verified 12 qianlima tests)

@@ -111,3 +111,134 @@ class QianlimaVipTests(unittest.TestCase):
         self.assertFalse(status["is_expired"])
         self.assertNotIn("username", json.dumps(status, ensure_ascii=False))
         self.assertNotIn("13800000000", json.dumps(status, ensure_ascii=False))
+
+
+class FakeQianlimaCrawler:
+    timeout = 10
+    session = object()
+
+    def __init__(self, pages, statuses=None):
+        self.pages = pages
+        self.statuses = statuses or {}
+        self.calls = []
+        self.auth_cookies = [{"domain": "qianlima.com", "cookie": "SESSION=secret", "enabled": True}]
+
+    def _respect_rate_limit(self, url):
+        self.calls.append(("rate", url))
+
+    def _get_headers(self):
+        return {"User-Agent": "test-agent"}
+
+    def _get_cookie_for_url(self, url):
+        return "SESSION=secret"
+
+    def _emit_info(self, message):
+        self.calls.append(("info", message))
+
+    def post_json(self, url, payload):
+        self.calls.append(("POST", url, payload))
+        page = payload["currentPage"]
+        status = self.statuses.get(page, 200)
+        if status >= 400:
+            return {"code": status, "data": {}}, status, "ERR"
+        return self.pages.get(page, {"code": 200, "data": {"data": []}}), status, "OK"
+
+    def get_json(self, url):
+        self.calls.append(("GET", url))
+        return {
+            "code": 200,
+            "data": {
+                "memberLevelName": "VIP会员",
+                "expireDate": "2026-12-31",
+                "showExpireDate": True,
+            },
+        }, 200, "OK"
+
+
+class QianlimaVipClientTests(unittest.TestCase):
+    def make_source(self):
+        return Source(id="qianlima", name="千里马", url="https://www.qianlima.com/")
+
+    def test_collect_pages_until_empty_and_maps_notices(self):
+        from crawler.qianlima_vip import QianlimaVipSearchClient
+
+        crawler = FakeQianlimaCrawler(
+            {
+                1: {
+                    "code": 200,
+                    "data": {
+                        "data": [
+                            {
+                                "contentid": 1,
+                                "progName": "上海会议系统招标公告",
+                                "updateTime": "2026-07-05",
+                                "url": "http://www.qianlima.com/zb/detail/20260705_1.html",
+                                "areaName": "上海",
+                            }
+                        ]
+                    },
+                },
+                2: {"code": 200, "data": {"data": []}},
+            }
+        )
+        client = QianlimaVipSearchClient(
+            crawler,
+            self.make_source(),
+            {"qianlima_max_pages_per_keyword": 5, "qianlima_max_results_per_run": 100},
+        )
+
+        result = client.collect(["会议"])
+
+        self.assertEqual(len(result.notices), 1)
+        self.assertEqual(result.notices[0].source_item_id, "1")
+        self.assertEqual(result.candidate_count, 1)
+        post_pages = [call[2]["currentPage"] for call in crawler.calls if call[0] == "POST"]
+        self.assertEqual(post_pages, [1, 2])
+
+    def test_collect_stops_after_duplicate_only_pages(self):
+        from crawler.qianlima_vip import QianlimaVipSearchClient
+
+        duplicate_record = {
+            "contentid": 7,
+            "progName": "上海会议系统招标公告",
+            "updateTime": "2026-07-05",
+            "url": "http://www.qianlima.com/zb/detail/20260705_7.html",
+        }
+        crawler = FakeQianlimaCrawler(
+            {
+                1: {"code": 200, "data": {"data": [duplicate_record]}},
+                2: {"code": 200, "data": {"data": [duplicate_record]}},
+                3: {"code": 200, "data": {"data": [duplicate_record]}},
+                4: {"code": 200, "data": {"data": [duplicate_record]}},
+            }
+        )
+        client = QianlimaVipSearchClient(
+            crawler,
+            self.make_source(),
+            {
+                "qianlima_max_pages_per_keyword": 10,
+                "qianlima_stop_after_duplicate_pages": 2,
+                "qianlima_max_results_per_run": 100,
+            },
+            notice_exists=lambda notice: notice.source_item_id == "7",
+        )
+
+        result = client.collect(["会议"])
+
+        self.assertEqual(result.notices, [])
+        post_pages = [call[2]["currentPage"] for call in crawler.calls if call[0] == "POST"]
+        self.assertEqual(post_pages, [1, 2])
+        self.assertIn("duplicate-only", result.diagnostics[-1]["reason"])
+
+    def test_fetch_membership_status_uses_safe_parser(self):
+        from crawler.qianlima_vip import QianlimaVipSearchClient
+
+        crawler = FakeQianlimaCrawler({})
+        client = QianlimaVipSearchClient(crawler, self.make_source(), {})
+
+        status = client.fetch_membership_status()
+
+        self.assertEqual(status["status"], "success")
+        self.assertEqual(status["member_level"], "VIP会员")
+        self.assertEqual(status["expire_date"], "2026-12-31")
+        self.assertTrue(any(call[0] == "GET" and call[1].endswith("/rest/u/company/getCompanyInfo") for call in crawler.calls))

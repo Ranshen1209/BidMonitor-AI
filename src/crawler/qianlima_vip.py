@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import copy
-from typing import Any, Iterable, Mapping
+from typing import Any, Callable, Iterable, Mapping, Optional
 
 try:
     from .source_models import Notice, Source, normalize_notice_url
@@ -156,3 +156,118 @@ def parse_membership_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
         "show_expire_date": bool(data.get("showExpireDate")),
         "is_expired": data.get("isExpired"),
     }
+
+
+def _extract_records(payload: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    data = payload.get("data")
+    if isinstance(data, Mapping):
+        records = data.get("data")
+        if isinstance(records, list):
+            return [record for record in records if isinstance(record, Mapping)]
+    return []
+
+
+def _safe_int(value: Any, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+class QianlimaVipSearchClient:
+    def __init__(
+        self,
+        crawler: Any,
+        source: Source,
+        config: Mapping[str, Any],
+        notice_exists: Optional[Callable[[Notice], bool]] = None,
+    ):
+        self.crawler = crawler
+        self.source = source
+        self.config = dict(config or {})
+        self.notice_exists = notice_exists or (lambda notice: False)
+        self.search_endpoint = self.config.get("qianlima_search_endpoint") or QIANLIMA_SEARCH_ENDPOINT
+        self.member_info_endpoint = self.config.get("qianlima_member_info_endpoint") or QIANLIMA_MEMBER_INFO_ENDPOINT
+        self.max_pages = _safe_int(self.config.get("qianlima_max_pages_per_keyword"), 30)
+        self.duplicate_page_limit = _safe_int(self.config.get("qianlima_stop_after_duplicate_pages"), 3)
+        self.max_results = _safe_int(self.config.get("qianlima_max_results_per_run"), 1000)
+
+    def collect(self, keywords: Iterable[str], stop_event: Any | None = None) -> Any:
+        try:
+            from .source_models import CrawlResult
+        except ImportError:  # pragma: no cover
+            from crawler.source_models import CrawlResult
+
+        result = CrawlResult()
+        seen_keys: set[str] = set()
+        for keyword in [str(item).strip() for item in keywords if str(item).strip()]:
+            duplicate_pages = 0
+            for page in range(1, self.max_pages + 1):
+                if stop_event and stop_event.is_set():
+                    return result
+                if len(result.notices) >= self.max_results:
+                    result.diagnostics.append({"status": "stopped", "reason": "max-results", "keyword": keyword})
+                    return result
+                payload = build_search_payload(keyword, page, self.config)
+                self.crawler._respect_rate_limit(self.search_endpoint)
+                response_payload, status_code, status_text = self.crawler.post_json(self.search_endpoint, payload)
+                result.fetched_count += 1
+                if status_code in (401, 403):
+                    result.error_count += 1
+                    result.errors.append("qianlima_cookie_invalid_or_expired")
+                    result.diagnostics.append(
+                        {"status": "failed", "reason": "qianlima_cookie_invalid_or_expired", "status_code": status_code}
+                    )
+                    return result
+                if status_code == 429 or status_code >= 500:
+                    result.error_count += 1
+                    result.errors.append(f"qianlima search HTTP {status_code}: {status_text}")
+                    result.diagnostics.append(
+                        {"status": "failed", "reason": f"qianlima search HTTP {status_code}", "status_code": status_code}
+                    )
+                    return result
+                records = _extract_records(response_payload)
+                if not records:
+                    result.diagnostics.append({"status": "stopped", "reason": "empty-page", "keyword": keyword, "page": page})
+                    break
+                page_new_count = 0
+                for record in records:
+                    notice = map_search_record_to_notice(self.source, record)
+                    if notice is None:
+                        result.skipped_count += 1
+                        continue
+                    key = notice.source_item_id or normalize_notice_url(notice.detail_url)
+                    normalized_url = normalize_notice_url(notice.detail_url)
+                    duplicate = bool(key and key in seen_keys)
+                    duplicate = duplicate or bool(normalized_url and normalized_url in seen_keys)
+                    duplicate = duplicate or self.notice_exists(notice)
+                    if duplicate:
+                        result.skipped_count += 1
+                        continue
+                    if key:
+                        seen_keys.add(key)
+                    if normalized_url:
+                        seen_keys.add(normalized_url)
+                    result.notices.append(notice)
+                    result.candidate_count += 1
+                    page_new_count += 1
+                if page_new_count == 0:
+                    duplicate_pages += 1
+                    if duplicate_pages >= self.duplicate_page_limit:
+                        result.diagnostics.append(
+                            {"status": "stopped", "reason": "duplicate-only-pages", "keyword": keyword, "page": page}
+                        )
+                        break
+                else:
+                    duplicate_pages = 0
+        result.parsed_count = len(result.notices)
+        return result
+
+    def fetch_membership_status(self) -> dict[str, Any]:
+        self.crawler._respect_rate_limit(self.member_info_endpoint)
+        payload, status_code, status_text = self.crawler.get_json(self.member_info_endpoint)
+        if status_code in (401, 403):
+            return {"status": "failed", "reason": "qianlima_cookie_invalid_or_expired", "status_code": status_code}
+        if status_code >= 400:
+            return {"status": "failed", "reason": f"HTTP {status_code}: {status_text}", "status_code": status_code}
+        return parse_membership_payload(payload)

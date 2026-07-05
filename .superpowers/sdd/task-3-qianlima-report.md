@@ -179,3 +179,42 @@
 ### Concerns
 
 - The scoped adapter suite is clean. Existing repo-level deprecation warnings in `src/database/storage.py` remain outside this task’s allowed write scope.
+
+## HTTP-Only Fallback Review Fix
+
+### RED Evidence
+
+- `.venv/bin/python -m pytest tests/test_source_adapter.py::TopologySourceAdapterTests::test_collect_qianlima_empty_vip_result_falls_back_without_browser_auto -q`
+  - `1 failed in 0.15s`
+  - Failed with `AssertionError: 1 != 0`
+  - Showed that after an empty/no-error VIP result, the adapter dropped into generic topology with browser mode still active and surfaced a browser-path failure instead of staying on HTTP.
+
+### GREEN Evidence
+
+- `tests/test_source_adapter.py`
+  - Added `test_collect_qianlima_empty_vip_result_falls_back_without_browser_auto` using the real Qianlima topology, an enabled cookie, empty VIP `CrawlResult`, and browser-enabled adapter config.
+  - Patched `UrlListCrawler._request_url_with_browser` to fail if called and verified the fallback stays on HTTP, does not hit the VIP endpoint, and still performs the public GET search traversal.
+- `src/crawler/source_adapter.py`
+  - When Qianlima VIP mode is attempted and returns empty/no-error, `TopologySourceAdapter.collect()` now scopes the adapter-built crawler's generic fallback to HTTP-only by temporarily disabling browser-first fetch and browser retry hooks, then restoring the crawler immediately after the fallback completes.
+  - This keeps Task 3's earlier behavior intact: VIP-first, cookie-backed `post_json`, generic no-VIP-endpoint traversal, and merged raw keys limited to `qianlima_search` and `detail`.
+
+### Test Outputs
+
+- `.venv/bin/python -m pytest tests/test_source_adapter.py::TopologySourceAdapterTests::test_collect_qianlima_empty_vip_result_falls_back_without_browser_auto -q`
+  - RED: `1 failed in 0.15s` (`AssertionError: 1 != 0`)
+  - GREEN: `1 passed in 0.11s`
+  - Final verification rerun: `1 passed in 0.12s`
+- `.venv/bin/python -m pytest tests/test_source_adapter.py -q`
+  - `41 passed, 11 subtests passed in 0.22s`
+- `git diff --check`
+  - clean
+
+### Files Changed
+
+- `src/crawler/source_adapter.py`
+- `tests/test_source_adapter.py`
+- `.superpowers/sdd/task-3-qianlima-report.md`
+
+### Concerns
+
+- This fix is intentionally narrow: it only forces HTTP-only behavior for the adapter-built crawler during the empty/no-error Qianlima VIP fallback path, so other sites and normal browser-assisted diagnostics remain unchanged.

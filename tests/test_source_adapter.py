@@ -91,6 +91,76 @@ class TopologySourceAdapterTests(unittest.TestCase):
         self.assertNotIn(discovered_vip_url, [call.args[0] for call in mock_request_url.call_args_list])
         collect_mock.assert_called_once()
 
+    @patch("crawler.url_list.UrlListCrawler._request_url_with_browser")
+    @patch("crawler.url_list.UrlListCrawler._request_http")
+    def test_collect_qianlima_empty_vip_result_falls_back_without_browser_auto(
+        self,
+        mock_request_http,
+        mock_request_url_with_browser,
+    ):
+        from crawler.source_models import CrawlResult
+
+        with open(os.path.join(ROOT_DIR, "server", "site_topologies.json"), "r", encoding="utf-8") as f:
+            qianlima_topology = next(
+                site for site in json.load(f)["sites"] if site.get("id") == "qianlima"
+            )
+
+        source = Source(
+            id="qianlima",
+            name="千里马",
+            url="https://www.qianlima.com/",
+            topology=qianlima_topology,
+            auth_cookies=[{"domain": "qianlima.com", "cookie": "SESSION=secret", "enabled": True}],
+        )
+        vip_result = CrawlResult()
+        requested_http = []
+        discovered_vip_url = "https://search.vip.qianlima.com/rest/service/website/search/solr"
+
+        def fake_request_http(method, url, params=None, data=None):
+            requested_http.append((method, url, params, data))
+            self.assertNotIn("search.vip.qianlima.com", url)
+            if method == "GET" and url == "https://www.qianlima.com/":
+                return (
+                    f'<html><body><a href="{discovered_vip_url}">search link</a></body></html>',
+                    200,
+                    "OK",
+                )
+            if method == "GET" and url in {
+                "https://www.qianlima.com/zbgg/",
+                "https://www.qianlima.com/mfzb",
+                "https://www.qianlima.com/zbyg",
+            }:
+                return "<html><body></body></html>", 200, "OK"
+            if method == "GET" and url == "https://search.qianlima.com/":
+                self.assertEqual(params, {"q": ""})
+                return "<html><body></body></html>", 200, "OK"
+            raise AssertionError(f"unexpected {method} {url}")
+
+        mock_request_http.side_effect = fake_request_http
+        mock_request_url_with_browser.side_effect = AssertionError(
+            "generic fallback must stay HTTP-only when empty VIP result falls back"
+        )
+
+        with patch("crawler.qianlima_vip.QianlimaVipSearchClient.collect", return_value=vip_result) as collect_mock:
+            result = TopologySourceAdapter(
+                {
+                    "request_delay": 0,
+                    "domain_delay": 0,
+                    "keywords": ["会议"],
+                    "browser_backend": {"mode": "browser_auto"},
+                }
+            ).collect(source)
+
+        self.assertEqual(result.notices, [])
+        self.assertEqual(result.error_count, 0)
+        self.assertTrue(requested_http)
+        self.assertNotIn(
+            discovered_vip_url,
+            [url for _method, url, _params, _data in requested_http],
+        )
+        mock_request_url_with_browser.assert_not_called()
+        collect_mock.assert_called_once()
+
     @patch("crawler.url_list.UrlListCrawler._request_url")
     def test_collect_qianlima_uses_vip_search_then_enriches_details(self, mock_request_url):
         from crawler.source_models import CrawlResult

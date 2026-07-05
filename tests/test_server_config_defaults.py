@@ -161,6 +161,18 @@ class ServerConfigDefaultsTests(unittest.TestCase):
 
         self.assertEqual(normalized["csv_url_sources"][0]["source_type"], "json")
 
+    def test_default_config_backfills_qianlima_vip_search_options(self):
+        config = app.normalize_config({"csv_url_sources": [{"file_path": app.DEFAULT_URL_SOURCES_PATH}]})
+
+        self.assertTrue(config["qianlima_vip_search_enabled"])
+        self.assertEqual(config["qianlima_num_per_page"], 20)
+        self.assertEqual(config["qianlima_max_pages_per_keyword"], 30)
+        self.assertEqual(config["qianlima_backfill_max_pages_per_keyword"], 100)
+        self.assertEqual(config["qianlima_stop_after_duplicate_pages"], 3)
+        self.assertEqual(config["qianlima_max_results_per_run"], 1000)
+        self.assertEqual(config["qianlima_time_type"], 8)
+        self.assertEqual(config["qianlima_sort_type"], 6)
+
     def test_normalize_config_repairs_stale_project_builtin_paths(self):
         stale_topologies_path = "/tmp/old/BidMonitor-AI/server/site_topologies.json"
         stale_url_sources_path = "/tmp/old/BidMonitor-AI/server/url_sources.json"
@@ -268,6 +280,54 @@ class ServerConfigDefaultsTests(unittest.TestCase):
         self.assertEqual(config["custom_nested"]["metadata"]["access_key_id"], "public-id")
         self.assertEqual(app.app_state.config["wechat_config"]["token"], "wechat-secret")
         self.assertEqual(app.app_state.config["contacts"][0]["wechat_token"], "contact-wechat-secret")
+
+    @patch("app.UrlListCrawler")
+    def test_qianlima_membership_endpoint_returns_safe_status(self, crawler_cls):
+        fake_crawler = crawler_cls.return_value
+        fake_crawler.get_json.return_value = (
+            {
+                "code": 200,
+                "data": {
+                    "memberLevelName": "VIP会员",
+                    "expireDate": "2026-12-31",
+                    "showExpireDate": True,
+                    "username": "secret-user",
+                    "shouji": "13800000000",
+                },
+            },
+            200,
+            "OK",
+        )
+        app.app_state.config = app.normalize_config(
+            {
+                "csv_url_sources": [
+                    {
+                        "name": "招标URL源",
+                        "source_type": "json",
+                        "file_path": app.DEFAULT_URL_SOURCES_PATH,
+                        "auth_cookies": [{"domain": "qianlima.com", "cookie": "SESSION=secret", "enabled": True}],
+                    }
+                ]
+            }
+        )
+
+        result = asyncio.run(app.get_qianlima_membership(user={"role": "user"}))
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["member_level"], "VIP会员")
+        self.assertEqual(result["expire_date"], "2026-12-31")
+        serialized = json.dumps(result, ensure_ascii=False)
+        self.assertNotIn("secret-user", serialized)
+        self.assertNotIn("13800000000", serialized)
+
+    def test_qianlima_membership_endpoint_reports_missing_cookie(self):
+        app.app_state.config = app.normalize_config(
+            {"csv_url_sources": [{"file_path": app.DEFAULT_URL_SOURCES_PATH, "auth_cookies": []}]}
+        )
+
+        result = asyncio.run(app.get_qianlima_membership(user={"role": "user"}))
+
+        self.assertEqual(result["status"], "missing_cookie")
 
     def test_get_contacts_masks_secret_bearing_values_without_mutating_config(self):
         app.app_state.config = app.normalize_config(

@@ -274,6 +274,8 @@ from results.review import (
     resolve_result_data,
     validate_review_update,
 )
+from crawler.qianlima_vip import QIANLIMA_MEMBER_INFO_ENDPOINT, has_qianlima_cookie, parse_membership_payload
+from crawler.url_list import UrlListCrawler
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
@@ -374,6 +376,14 @@ def normalize_config(config: Dict[str, Any]) -> Dict[str, Any]:
         source.setdefault('auth_cookies', [])
         if str(source.get('file_path', '')).endswith('.json'):
             source.setdefault('source_type', 'json')
+    config.setdefault('qianlima_vip_search_enabled', True)
+    config.setdefault('qianlima_num_per_page', 20)
+    config.setdefault('qianlima_max_pages_per_keyword', 30)
+    config.setdefault('qianlima_backfill_max_pages_per_keyword', 100)
+    config.setdefault('qianlima_stop_after_duplicate_pages', 3)
+    config.setdefault('qianlima_max_results_per_run', 1000)
+    config.setdefault('qianlima_time_type', 8)
+    config.setdefault('qianlima_sort_type', 6)
     config.pop('custom_sites', None)
     return config
 
@@ -520,6 +530,14 @@ class ConfigModel(BaseModel):
     use_selenium: Optional[bool] = None  # Selenium浏览器模式开关
     browser_backend: Optional[Dict[str, Any]] = None
     site_topologies_path: Optional[str] = None
+    qianlima_vip_search_enabled: Optional[bool] = None
+    qianlima_num_per_page: Optional[int] = None
+    qianlima_max_pages_per_keyword: Optional[int] = None
+    qianlima_backfill_max_pages_per_keyword: Optional[int] = None
+    qianlima_stop_after_duplicate_pages: Optional[int] = None
+    qianlima_max_results_per_run: Optional[int] = None
+    qianlima_time_type: Optional[int] = None
+    qianlima_sort_type: Optional[int] = None
 
 class LoginRequest(BaseModel):
     username: str
@@ -644,6 +662,37 @@ def parse_sites_update_payload(payload: Any) -> Dict[str, Any]:
         if sanitized:
             site_metadata[key] = sanitized
     return {'enabled_sites': enabled_sites, 'site_metadata': site_metadata}
+
+def qianlima_auth_cookies_from_config(config: Dict[str, Any]) -> List[Dict[str, Any]]:
+    cookies: List[Dict[str, Any]] = []
+    for source in config.get('csv_url_sources', []):
+        for item in source.get('auth_cookies', []) or []:
+            if isinstance(item, dict):
+                cookies.append(item)
+    return cookies
+
+def build_qianlima_membership_crawler(config: Dict[str, Any]) -> UrlListCrawler:
+    source_config = {
+        "name": "千里马会员状态",
+        "file_path": "",
+        "auth_cookies": qianlima_auth_cookies_from_config(config),
+        "domain_delay": config.get("domain_delay", 0),
+    }
+    crawler = UrlListCrawler(config, source_config)
+
+    if not hasattr(crawler, "get_json"):
+        def get_json(url: str):
+            try:
+                html, status_code, status_text = crawler._request_http("GET", url)
+            except Exception as exc:
+                return {}, 599, f"{exc.__class__.__name__}: request failed"
+            try:
+                return json.loads(html or "{}"), status_code, status_text
+            except (TypeError, ValueError):
+                return {}, status_code, status_text
+
+        crawler.get_json = get_json
+    return crawler
 
 # 定时任务：执行监控
 async def run_monitor_task():
@@ -1107,6 +1156,27 @@ async def get_sites(user: Dict[str, Any] = Depends(get_current_user)):
         result.append(build_site_response(key, info, enabled, metadata))
     
     return result
+
+@app.get("/api/sites/qianlima/membership")
+async def get_qianlima_membership(user: Dict[str, Any] = Depends(get_current_user)):
+    """获取千里马会员状态，不返回账号个人信息或 Cookie。"""
+    config = app_state.config
+    cookies = qianlima_auth_cookies_from_config(config)
+    if not has_qianlima_cookie(cookies):
+        return {"status": "missing_cookie", "reason": "未配置 qianlima.com 授权 Cookie"}
+
+    crawler = build_qianlima_membership_crawler(config)
+    try:
+        payload, status_code, status_text = crawler.get_json(
+            config.get("qianlima_member_info_endpoint") or QIANLIMA_MEMBER_INFO_ENDPOINT
+        )
+    except Exception as exc:
+        return {"status": "failed", "reason": f"{exc.__class__.__name__}: request failed", "status_code": 599}
+    if status_code in (401, 403):
+        return {"status": "failed", "reason": "qianlima_cookie_invalid_or_expired", "status_code": status_code}
+    if status_code >= 400:
+        return {"status": "failed", "reason": f"HTTP {status_code}: {status_text}", "status_code": status_code}
+    return parse_membership_payload(payload)
 
 @app.post("/api/sites")
 async def update_sites(payload: Any = Body(...), user: Dict[str, Any] = Depends(require_admin)):

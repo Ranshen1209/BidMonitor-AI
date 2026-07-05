@@ -152,6 +152,9 @@ class TopologySourceAdapterTests(unittest.TestCase):
         self.assertEqual(result.notices[0].title, "上海会议系统招标公告")
         self.assertIn("预算金额", result.notices[0].content)
         self.assertIn("qianlima_search", result.notices[0].raw)
+        self.assertIn("detail", result.notices[0].raw)
+        self.assertNotIn("legacy", result.notices[0].raw)
+        self.assertEqual(result.notices[0].raw["detail"]["title"], "上海会议系统招标公告")
         mock_request_url.assert_called_once_with(detail_url)
         collect_mock.assert_called_once()
 

@@ -111,3 +111,30 @@
 ### Concerns
 
 - The required suite is clean, but the broader repo still emits the pre-existing `datetime.utcnow()` deprecation warnings in `src/database/storage.py`, which remains outside this task’s allowed write scope.
+
+## Review Fix Addendum
+
+### RED Evidence
+
+- `tests/test_source_adapter.py::TopologySourceAdapterTests::test_collect_qianlima_uses_vip_search_then_enriches_details`
+  - Review concern: the enriched notice was still exposing merged detail payload under `raw["legacy"]` instead of a public `raw["detail"]` key.
+- `tests/test_source_crawler.py::CrawlRunnerTests::test_run_source_passes_notice_exists_callback`
+  - Review concern: the callback path was only being exercised after `run_source()` completed, so the test did not prove the storage `exists()` lookup happened during adapter collection.
+
+### GREEN Evidence
+
+- `src/crawler/source_adapter.py`
+  - `_merge_qianlima_detail_notice()` now publishes the parsed detail payload under `raw["detail"]`.
+- `tests/test_source_adapter.py`
+  - The qianlima enrichment regression now asserts `raw["qianlima_search"]` and `raw["detail"]` exist and that `raw["legacy"]` is not the public merged-detail key.
+- `tests/test_source_crawler.py`
+  - The callback regression now makes the fake adapter call `notice_exists()` inside `collect()`, so `storage.exists()` is exercised through the normal run flow.
+
+### Test Outputs
+
+- `.venv/bin/python -m pytest tests/test_source_adapter.py::TopologySourceAdapterTests::test_collect_qianlima_uses_vip_search_then_enriches_details tests/test_source_crawler.py::CrawlRunnerTests::test_run_source_passes_notice_exists_callback -q`
+  - `2 passed in 0.14s`
+- `.venv/bin/python -m pytest tests/test_source_adapter.py tests/test_source_crawler.py::CrawlRunnerTests -q`
+  - `48 passed, 4 warnings, 11 subtests passed in 0.24s`
+- `git diff --check`
+  - clean

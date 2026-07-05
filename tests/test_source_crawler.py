@@ -164,7 +164,14 @@ class CrawlRunnerTests(unittest.TestCase):
         result = CrawlResult(notices=[notice], parsed_count=1)
         storage = FakeStorage()
         storage.exists = Mock(return_value=True)
-        adapter = FakeAdapter(result)
+
+        class CheckingAdapter(FakeAdapter):
+            def collect(self, source, stop_event=None, notice_exists=None):
+                self.calls.append((source, stop_event, notice_exists))
+                self.seen_exists = notice_exists(notice) if callable(notice_exists) else None
+                return self.result
+
+        adapter = CheckingAdapter(result)
         runner = CrawlRunner(storage, adapter=adapter)
 
         runner.run_source(source)
@@ -172,8 +179,8 @@ class CrawlRunnerTests(unittest.TestCase):
         self.assertEqual(len(adapter.calls), 1)
         callback = adapter.calls[0][2]
         self.assertTrue(callable(callback))
-        self.assertTrue(callback(notice))
-        storage.exists.assert_called_once()
+        self.assertTrue(adapter.seen_exists)
+        storage.exists.assert_called_once_with(notice.to_bid_info())
 
     def test_run_source_truncates_error_message_before_finishing_run(self):
         source = make_source()

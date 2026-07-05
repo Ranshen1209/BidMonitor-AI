@@ -589,9 +589,9 @@ class TopologySourceAdapter:
     def _merge_qianlima_detail_notice(self, search_notice: Notice, detail_notice: Notice) -> Notice:
         merged_raw = dict(search_notice.raw or {})
         merged_raw["qianlima_search"] = dict((search_notice.raw or {}).get("qianlima", {}))
-        legacy_raw = dict((detail_notice.raw or {}).get("legacy", {}))
-        if legacy_raw:
-            merged_raw["legacy"] = legacy_raw
+        detail_raw = dict((detail_notice.raw or {}).get("legacy", {}))
+        if detail_raw:
+            merged_raw["detail"] = detail_raw
         return Notice(
             source_id=search_notice.source_id,
             source_name=search_notice.source_name,

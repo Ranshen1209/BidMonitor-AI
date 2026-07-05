@@ -38,3 +38,4 @@ Baseline: 319 passed, 55 warnings, 82 subtests passed
 - Task 2: complete (commits f3657ae..aba3000, review clean after fixes: max-results cap, candidate counts, early-return counts, invalid-only pages, payload fallback; controller verified 12 qianlima tests)
 - Task 3: complete (commits 3dbb018..5cf1af7, review clean after fixes: fallback accounting, HTTP-only fallback, raw payload shape, VIP endpoint traversal guard, strict JSON helper exception status text)
 - Task 4: complete (commits 509bcaf..cd72997, review clean; backend membership endpoint and Qianlima config defaults)
+- Task 5: complete (commits 6621493..dc99e0e, review clean; frontend membership status line)

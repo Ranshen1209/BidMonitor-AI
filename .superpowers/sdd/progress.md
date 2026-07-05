@@ -28,3 +28,15 @@ Plan: docs/superpowers/plans/2026-07-02-results-center-ai-extraction.md
 - Task 5: complete (commits c5fa7ba..2f418fd plus frontend cleanup in c5fa7ba..9c7f491, review clean; server/app custom-sites routes/config verified absent by controller)
 - Final review: fixed blocking findings in 87689f8 (contacts secret masking, AI test endpoint, detail-fetch failure status, structured recommendation serialization, q search before pagination, bulk missing-ID atomicity, legacy chat endpoint inference)
 - Integration tests: passed locally after final fix (51 results/API/AI/storage/monitor tests; 27 URL/browser tests; 23 static frontend tests; 6 auth tests)
+
+# SDD Progress: Qianlima VIP Search
+Plan: docs/superpowers/plans/2026-07-05-qianlima-vip-search.md
+Branch: codex/qianlima-vip-search
+Test runner: .venv/bin/python -m pytest
+Baseline: 319 passed, 55 warnings, 82 subtests passed
+- Task 1: complete (commits b47153a..7079630, review clean; controller verified 5 qianlima tests and full suite 324 passed, 55 warnings)
+- Task 2: complete (commits f3657ae..aba3000, review clean after fixes: max-results cap, candidate counts, early-return counts, invalid-only pages, payload fallback; controller verified 12 qianlima tests)
+- Task 3: complete (commits 3dbb018..5cf1af7, review clean after fixes: fallback accounting, HTTP-only fallback, raw payload shape, VIP endpoint traversal guard, strict JSON helper exception status text)
+- Task 4: complete (commits 509bcaf..cd72997, review clean; backend membership endpoint and Qianlima config defaults)
+- Task 5: complete (commits 6621493..dc99e0e, review clean; frontend membership status line)
+- Final review fixes: complete (commit 83ebd64; backfill mode uses backfill page limit, Qianlima config flows into crawler overrides, membership expiry respects show_expire_date; full suite 350 passed)

@@ -779,6 +779,21 @@ svg {
     line-height: 1.35;
 }
 
+.site-membership {
+    color: var(--text-secondary);
+    font-size: var(--font-size-sm);
+    line-height: 1.5;
+    margin-top: 4px;
+}
+
+.site-membership.is-warning {
+    color: #8a5a00;
+}
+
+.site-membership.is-muted {
+    color: var(--muted);
+}
+
 .site-flags {
     display: grid;
     gap: 8px;

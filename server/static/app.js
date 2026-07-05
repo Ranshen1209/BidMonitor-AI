@@ -6,6 +6,7 @@ const LOG_FETCH_LIMIT = 2000;
 let currentConfig = {}, currentSites = [], currentUsers = [], currentUser = null;
 let currentResults = [], resultSettings = null, selectedResultIds = new Set(), activeResultId = null;
 let activeDetailManualOverrides = {};
+let qianlimaMembership = null;
 let editingUserId = null;
 let nextRunTime = null, countdownInterval = null;
 let statusTimer = null, logsTimer = null;
@@ -746,11 +747,39 @@ async function loadSites() {
     try {
         const res = await apiFetch('/api/sites');
         currentSites = await res.json();
+        qianlimaMembership = null;
         renderSites();
+        loadQianlimaMembership();
     } catch (e) {
         console.error(e);
         document.getElementById('sitesList').innerHTML = '<div class="empty-state">加载失败</div>';
     }
+}
+
+async function loadQianlimaMembership() {
+    try {
+        const res = await apiFetch('/api/sites/qianlima/membership');
+        qianlimaMembership = await res.json();
+    } catch (e) {
+        qianlimaMembership = { status: 'failed', reason: e.message };
+    }
+    renderSites();
+}
+
+function renderQianlimaMembership(site) {
+    if (!site || site.key !== 'qianlima') return '';
+    if (!qianlimaMembership) return '<div class="site-membership is-muted">会员状态：检测中</div>';
+    if (qianlimaMembership.status === 'missing_cookie') {
+        return '<div class="site-membership is-warning">会员状态：未配置 Cookie</div>';
+    }
+    if (qianlimaMembership.status !== 'success') {
+        const reason = qianlimaMembership.reason || '检测失败';
+        return `<div class="site-membership is-warning">会员状态：${escapeHtml(reason)}</div>`;
+    }
+    const level = qianlimaMembership.member_level || '会员';
+    const expire = qianlimaMembership.show_expire_date && qianlimaMembership.expire_date ? `，到期：${qianlimaMembership.expire_date}` : '';
+    const expiredClass = qianlimaMembership.is_expired ? ' is-warning' : '';
+    return `<div class="site-membership${expiredClass}">会员状态：${escapeHtml(level + expire)}</div>`;
 }
 
 function renderSites() {
@@ -775,6 +804,7 @@ function renderSites() {
                     </label>
                     <div class="site-url">${escapeHtml(url || s.key || '')}</div>
                     <div class="site-meta">最近检测：${checkedAt}</div>
+                    ${renderQianlimaMembership(s)}
                     ${diagnostic}
                 </div>
                 <label class="site-field">

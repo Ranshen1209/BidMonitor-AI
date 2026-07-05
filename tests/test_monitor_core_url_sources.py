@@ -66,6 +66,27 @@ class MonitorCoreUrlSourcesTests(unittest.TestCase):
 
         self.assertEqual(monitor.crawlers, [])
 
+    def test_qianlima_options_flow_into_source_backed_crawler_config(self):
+        monitor = MonitorCore(
+            keywords=["弱电"],
+            notify_method="none",
+            crawler_overrides={
+                "enabled_sites": [],
+                "use_selenium": False,
+                "csv_url_sources": [],
+                "qianlima_backfill_enabled": True,
+                "qianlima_backfill_max_pages_per_keyword": 100,
+                "qianlima_max_pages_per_keyword": 30,
+                "qianlima_stop_after_duplicate_pages": 3,
+            },
+        )
+
+        crawler_config = monitor.config["crawler"]
+        self.assertTrue(crawler_config["qianlima_backfill_enabled"])
+        self.assertEqual(crawler_config["qianlima_backfill_max_pages_per_keyword"], 100)
+        self.assertEqual(crawler_config["qianlima_max_pages_per_keyword"], 30)
+        self.assertEqual(crawler_config["qianlima_stop_after_duplicate_pages"], 3)
+
     def test_monitor_core_loads_enabled_csv_url_sources(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = os.path.join(tmpdir, "urls.txt")

@@ -2,6 +2,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest.mock import Mock
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC_DIR = os.path.join(ROOT_DIR, "src")
@@ -18,8 +19,8 @@ class FakeAdapter:
         self.result = result
         self.calls = []
 
-    def collect(self, source, stop_event=None):
-        self.calls.append((source, stop_event))
+    def collect(self, source, stop_event=None, notice_exists=None):
+        self.calls.append((source, stop_event, notice_exists))
         return self.result
 
 
@@ -28,8 +29,8 @@ class RaisingAdapter:
         self.exception = exception
         self.calls = []
 
-    def collect(self, source, stop_event=None):
-        self.calls.append((source, stop_event))
+    def collect(self, source, stop_event=None, notice_exists=None):
+        self.calls.append((source, stop_event, notice_exists))
         raise self.exception
 
 
@@ -46,6 +47,9 @@ class FakeStorage:
 
     def finish_crawl_run(self, run_id, status, counts=None):
         self.finished.append((run_id, status, counts or {}))
+
+    def exists(self, _bid):
+        return False
 
 
 def make_source(source_id="source-a", name="Source A"):
@@ -105,7 +109,9 @@ class CrawlRunnerTests(unittest.TestCase):
         bids = runner.run_source(source)
 
         self.assertEqual(storage.started, [("source-a", "Source A")])
-        self.assertEqual(adapter.calls, [(source, None)])
+        self.assertEqual(len(adapter.calls), 1)
+        self.assertEqual(adapter.calls[0][:2], (source, None))
+        self.assertTrue(callable(adapter.calls[0][2]))
         self.assertEqual(len(storage.finished), 1)
         run_id, status, counts = storage.finished[0]
         self.assertEqual(run_id, 101)
@@ -151,6 +157,30 @@ class CrawlRunnerTests(unittest.TestCase):
         self.assertEqual(status, "failed")
         self.assertEqual(counts["error_count"], 1)
         self.assertEqual(counts["error_message"], "source fetch failed")
+
+    def test_run_source_passes_notice_exists_callback(self):
+        source = make_source()
+        notice = make_notice(source)
+        result = CrawlResult(notices=[notice], parsed_count=1)
+        storage = FakeStorage()
+        storage.exists = Mock(return_value=True)
+
+        class CheckingAdapter(FakeAdapter):
+            def collect(self, source, stop_event=None, notice_exists=None):
+                self.calls.append((source, stop_event, notice_exists))
+                self.seen_exists = notice_exists(notice) if callable(notice_exists) else None
+                return self.result
+
+        adapter = CheckingAdapter(result)
+        runner = CrawlRunner(storage, adapter=adapter)
+
+        runner.run_source(source)
+
+        self.assertEqual(len(adapter.calls), 1)
+        callback = adapter.calls[0][2]
+        self.assertTrue(callable(callback))
+        self.assertTrue(adapter.seen_exists)
+        storage.exists.assert_called_once_with(notice.to_bid_info())
 
     def test_run_source_truncates_error_message_before_finishing_run(self):
         source = make_source()

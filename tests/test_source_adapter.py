@@ -2,7 +2,7 @@ import json
 import os
 import sys
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import requests
 
@@ -33,6 +33,284 @@ def make_source():
 
 
 class TopologySourceAdapterTests(unittest.TestCase):
+    @patch("crawler.url_list.UrlListCrawler._request_http")
+    @patch("crawler.url_list.UrlListCrawler._request_url")
+    def test_collect_qianlima_empty_vip_result_falls_back_without_generic_vip_search(self, mock_request_url, mock_request_http):
+        from crawler.source_models import CrawlResult
+
+        with open(os.path.join(ROOT_DIR, "server", "site_topologies.json"), "r", encoding="utf-8") as f:
+            qianlima_topology = next(
+                site for site in json.load(f)["sites"] if site.get("id") == "qianlima"
+            )
+
+        source = Source(
+            id="qianlima",
+            name="千里马",
+            url="https://www.qianlima.com/",
+            topology=qianlima_topology,
+            auth_cookies=[{"domain": "qianlima.com", "cookie": "SESSION=secret", "enabled": True}],
+        )
+        vip_result = CrawlResult(diagnostics=[{"status": "stopped", "reason": "empty-page"}])
+        requested_http = []
+        discovered_vip_url = "https://search.vip.qianlima.com/rest/service/website/search/solr"
+
+        def fake_request(url):
+            if url == "https://www.qianlima.com/":
+                return (
+                    f'<html><body><a href="{discovered_vip_url}">search link</a></body></html>',
+                    200,
+                    "OK",
+                )
+            if url in {
+                "https://www.qianlima.com/zbgg/",
+                "https://www.qianlima.com/mfzb",
+                "https://www.qianlima.com/zbyg",
+            }:
+                return "<html><body></body></html>", 200, "OK"
+            if url == discovered_vip_url:
+                raise AssertionError("generic fallback must not request discovered VIP search endpoint")
+            raise AssertionError(f"unexpected url {url}")
+
+        def fake_request_http(method, url, params=None, data=None):
+            requested_http.append((method, url, params, data))
+            self.assertNotIn("search.vip.qianlima.com", url)
+            self.assertEqual(method, "GET")
+            self.assertEqual(url, "https://search.qianlima.com/")
+            self.assertEqual(params, {"q": ""})
+            return "<html><body></body></html>", 200, "OK"
+
+        mock_request_url.side_effect = fake_request
+        mock_request_http.side_effect = fake_request_http
+
+        with patch("crawler.qianlima_vip.QianlimaVipSearchClient.collect", return_value=vip_result) as collect_mock:
+            result = TopologySourceAdapter({"request_delay": 0, "domain_delay": 0, "keywords": ["会议"]}).collect(source)
+
+        self.assertEqual(result.notices, [])
+        self.assertEqual(result.error_count, 0)
+        self.assertEqual(len(requested_http), 1)
+        self.assertNotIn(discovered_vip_url, [call.args[0] for call in mock_request_url.call_args_list])
+        collect_mock.assert_called_once()
+
+    @patch("crawler.url_list.UrlListCrawler._request_url_with_browser")
+    @patch("crawler.url_list.UrlListCrawler._request_http")
+    def test_collect_qianlima_empty_vip_result_falls_back_without_browser_auto(
+        self,
+        mock_request_http,
+        mock_request_url_with_browser,
+    ):
+        from crawler.source_models import CrawlResult
+
+        with open(os.path.join(ROOT_DIR, "server", "site_topologies.json"), "r", encoding="utf-8") as f:
+            qianlima_topology = next(
+                site for site in json.load(f)["sites"] if site.get("id") == "qianlima"
+            )
+
+        source = Source(
+            id="qianlima",
+            name="千里马",
+            url="https://www.qianlima.com/",
+            topology=qianlima_topology,
+            auth_cookies=[{"domain": "qianlima.com", "cookie": "SESSION=secret", "enabled": True}],
+        )
+        vip_result = CrawlResult()
+        requested_http = []
+        discovered_vip_url = "https://search.vip.qianlima.com/rest/service/website/search/solr"
+
+        def fake_request_http(method, url, params=None, data=None):
+            requested_http.append((method, url, params, data))
+            self.assertNotIn("search.vip.qianlima.com", url)
+            if method == "GET" and url == "https://www.qianlima.com/":
+                return (
+                    f'<html><body><a href="{discovered_vip_url}">search link</a></body></html>',
+                    200,
+                    "OK",
+                )
+            if method == "GET" and url in {
+                "https://www.qianlima.com/zbgg/",
+                "https://www.qianlima.com/mfzb",
+                "https://www.qianlima.com/zbyg",
+            }:
+                return "<html><body></body></html>", 200, "OK"
+            if method == "GET" and url == "https://search.qianlima.com/":
+                self.assertEqual(params, {"q": ""})
+                return "<html><body></body></html>", 200, "OK"
+            raise AssertionError(f"unexpected {method} {url}")
+
+        mock_request_http.side_effect = fake_request_http
+        mock_request_url_with_browser.side_effect = AssertionError(
+            "generic fallback must stay HTTP-only when empty VIP result falls back"
+        )
+
+        with patch("crawler.qianlima_vip.QianlimaVipSearchClient.collect", return_value=vip_result) as collect_mock:
+            result = TopologySourceAdapter(
+                {
+                    "request_delay": 0,
+                    "domain_delay": 0,
+                    "keywords": ["会议"],
+                    "browser_backend": {"mode": "browser_auto"},
+                }
+            ).collect(source)
+
+        self.assertEqual(result.notices, [])
+        self.assertEqual(result.error_count, 0)
+        self.assertTrue(requested_http)
+        self.assertNotIn(
+            discovered_vip_url,
+            [url for _method, url, _params, _data in requested_http],
+        )
+        mock_request_url_with_browser.assert_not_called()
+        collect_mock.assert_called_once()
+
+    @patch("crawler.url_list.UrlListCrawler._request_url_with_browser")
+    @patch("crawler.url_list.UrlListCrawler._request_url")
+    def test_collect_qianlima_uses_vip_search_then_enriches_details(
+        self,
+        mock_request_url,
+        mock_request_url_with_browser,
+    ):
+        from crawler.source_models import CrawlResult
+
+        detail_url = "http://www.qianlima.com/zb/detail/20260705_8.html"
+        source = Source(
+            id="qianlima",
+            name="千里马",
+            url="https://www.qianlima.com/",
+            topology={
+                "id": "qianlima",
+                "name": "千里马",
+                "entry_url": "https://www.qianlima.com/",
+                "allowed_hosts": ["www.qianlima.com", "search.vip.qianlima.com"],
+                "detail_url_regex": [r"^https?://www\.qianlima\.com/zb/detail/\d{8}_\d+\.html$"],
+            },
+            auth_cookies=[{"domain": "qianlima.com", "cookie": "SESSION=secret", "enabled": True}],
+        )
+
+        mock_request_url.return_value = (
+            """
+            <html><body>
+                <h1>上海会议系统招标公告</h1>
+                <main>
+                    项目名称：上海会议系统公开招标项目
+                    采购人：上海采购单位
+                    预算金额：120万元
+                    发布时间：2026-07-05
+                </main>
+            </body></html>
+            """,
+            200,
+            "OK",
+        )
+
+        adapter = TopologySourceAdapter(
+            {
+                "keywords": ["会议"],
+                "qianlima_max_pages_per_keyword": 1,
+                "qianlima_max_results_per_run": 20,
+                "browser_backend": {"mode": "browser_auto"},
+            }
+        )
+        vip_result = CrawlResult(
+            notices=[
+                Notice(
+                    source_id="qianlima",
+                    source_name="千里马",
+                    source_item_id="8",
+                    title="上海会议系统招标公告",
+                    detail_url=detail_url,
+                    publish_date="2026-07-05",
+                    content="project_stage: 招标公告",
+                    raw={"qianlima": {"contentid": 8}},
+                )
+            ],
+            fetched_count=1,
+            candidate_count=1,
+            parsed_count=1,
+            diagnostics=[{"status": "success", "parsed_count": 1}],
+        )
+
+        mock_request_url_with_browser.side_effect = AssertionError(
+            "VIP detail enrichment must stay HTTP-only"
+        )
+
+        with patch("crawler.qianlima_vip.QianlimaVipSearchClient.collect", return_value=vip_result) as collect_mock:
+            result = adapter.collect(source)
+
+        self.assertEqual(len(result.notices), 1)
+        self.assertEqual(result.notices[0].source_item_id, "8")
+        self.assertEqual(result.notices[0].title, "上海会议系统招标公告")
+        self.assertIn("预算金额", result.notices[0].content)
+        self.assertIn("qianlima_search", result.notices[0].raw)
+        self.assertIn("detail", result.notices[0].raw)
+        self.assertNotIn("qianlima", result.notices[0].raw)
+        self.assertNotIn("legacy", result.notices[0].raw)
+        self.assertEqual(result.notices[0].raw["detail"]["title"], "上海会议系统招标公告")
+        mock_request_url.assert_called_once_with(detail_url)
+        mock_request_url_with_browser.assert_not_called()
+        collect_mock.assert_called_once()
+
+    @patch("crawler.url_list.UrlListCrawler._request_url")
+    def test_collect_qianlima_reports_failed_detail_enrichment_attempt(self, mock_request_url):
+        from crawler.source_models import CrawlResult
+
+        detail_url = "http://www.qianlima.com/zb/detail/20260705_9.html"
+        source = Source(
+            id="qianlima",
+            name="千里马",
+            url="https://www.qianlima.com/",
+            topology={
+                "id": "qianlima",
+                "name": "千里马",
+                "entry_url": "https://www.qianlima.com/",
+                "allowed_hosts": ["www.qianlima.com", "search.vip.qianlima.com"],
+                "detail_url_regex": [r"^https?://www\.qianlima\.com/zb/detail/\d{8}_\d+\.html$"],
+                "blocked_phrases": ["需要项目通权限才能查看"],
+            },
+            auth_cookies=[{"domain": "qianlima.com", "cookie": "SESSION=secret", "enabled": True}],
+        )
+        search_notice = Notice(
+            source_id="qianlima",
+            source_name="千里马",
+            source_item_id="9",
+            title="上海会议系统招标公告",
+            detail_url=detail_url,
+            publish_date="2026-07-05",
+            content="project_stage: 招标公告",
+            raw={"qianlima": {"contentid": 9, "token": "redacted-token"}},
+        )
+        vip_result = CrawlResult(
+            notices=[search_notice],
+            fetched_count=1,
+            candidate_count=1,
+            parsed_count=1,
+            diagnostics=[{"status": "success", "parsed_count": 1}],
+        )
+        mock_request_url.return_value = (
+            "<html><body>需要项目通权限才能查看</body></html>",
+            403,
+            "Forbidden",
+        )
+
+        with patch("crawler.qianlima_vip.QianlimaVipSearchClient.collect", return_value=vip_result):
+            result = TopologySourceAdapter({"request_delay": 0, "domain_delay": 0, "keywords": ["会议"]}).collect(source)
+
+        self.assertEqual(len(result.notices), 1)
+        self.assertEqual(result.notices[0].detail_url, detail_url)
+        self.assertEqual(result.notices[0].content, "project_stage: 招标公告")
+        self.assertEqual(result.fetched_count, 2)
+        self.assertGreaterEqual(result.error_count + result.skipped_count, 1)
+        self.assertGreaterEqual(result.error_count, 1)
+        self.assertTrue(any("detail" in error for error in result.errors))
+        self.assertTrue(
+            any(
+                diagnostic.get("url") == detail_url
+                and diagnostic.get("status") in {"failed", "skipped"}
+                and "detail" in diagnostic.get("reason", "")
+                for diagnostic in result.diagnostics
+            )
+        )
+        serialized = json.dumps(result.diagnostics + [{"errors": result.errors}], ensure_ascii=False)
+        self.assertNotIn("redacted-token", serialized)
+
     @patch("crawler.url_list.UrlListCrawler._request_http")
     @patch("crawler.url_list.UrlListCrawler._request_url")
     def test_collect_admits_structured_json_from_post_search(self, mock_request_url, mock_request_http):
@@ -768,6 +1046,148 @@ class TopologySourceAdapterTests(unittest.TestCase):
         self.assertEqual(len(result.notices), 1)
         self.assertEqual(len(requested), 3)
         self.assertEqual(result.fetched_count, len(requested))
+
+    def test_build_crawler_post_json_attaches_cookie_without_logging_body(self):
+        source = Source(
+            id="qianlima",
+            name="千里马",
+            url="https://www.qianlima.com/",
+            auth_cookies=[{"domain": "qianlima.com", "cookie": "SESSION=secret", "enabled": True}],
+        )
+        logs = []
+        adapter = TopologySourceAdapter({"request_delay": 0, "domain_delay": 0, "log_callback": logs.append})
+        crawler = adapter._build_crawler(source)
+        response = Mock(status_code=200, reason="OK", text='{"ok": true}', apparent_encoding="utf-8", encoding="utf-8")
+        crawler.session = Mock()
+        crawler.session.post.return_value = response
+
+        payload = {"keywords": "会议", "token": "should-not-log"}
+        result_payload, status_code, status_text = crawler.post_json(
+            "https://search.vip.qianlima.com/rest/service/website/search/solr",
+            payload,
+        )
+
+        self.assertEqual(result_payload, {"ok": True})
+        self.assertEqual(status_code, 200)
+        self.assertEqual(status_text, "OK")
+        crawler.session.post.assert_called_once()
+        kwargs = crawler.session.post.call_args.kwargs
+        self.assertEqual(kwargs["json"], payload)
+        self.assertEqual(kwargs["headers"]["Cookie"], "SESSION=secret")
+        self.assertTrue(any("HTTP POST JSON" in message for message in logs))
+        self.assertFalse(any("SESSION=secret" in message or "should-not-log" in message for message in logs))
+
+    @patch("crawler.url_list.UrlListCrawler._request_url_with_browser")
+    @patch("crawler.url_list.UrlListCrawler._request_http")
+    def test_build_crawler_get_json_uses_http_without_browser_auto(
+        self,
+        mock_request_http,
+        mock_request_url_with_browser,
+    ):
+        source = Source(
+            id="qianlima",
+            name="千里马",
+            url="https://www.qianlima.com/",
+        )
+        adapter = TopologySourceAdapter(
+            {
+                "request_delay": 0,
+                "domain_delay": 0,
+                "browser_backend": {"mode": "browser_auto"},
+            }
+        )
+        crawler = adapter._build_crawler(source)
+        mock_request_http.return_value = ('{"ok": true, "count": 1}', 200, "OK")
+        mock_request_url_with_browser.side_effect = AssertionError(
+            "get_json() must stay HTTP-only"
+        )
+
+        result_payload, status_code, status_text = crawler.get_json(
+            "https://search.vip.qianlima.com/rest/service/website/search/solr"
+        )
+
+        self.assertEqual(result_payload, {"ok": True, "count": 1})
+        self.assertEqual(status_code, 200)
+        self.assertEqual(status_text, "OK")
+        mock_request_http.assert_called_once_with(
+            "GET",
+            "https://search.vip.qianlima.com/rest/service/website/search/solr",
+        )
+        mock_request_url_with_browser.assert_not_called()
+
+    def test_build_crawler_post_json_returns_sanitized_error_on_request_exception(self):
+        source = Source(
+            id="qianlima",
+            name="千里马",
+            url="https://www.qianlima.com/",
+            auth_cookies=[{"domain": "qianlima.com", "cookie": "SESSION=secret", "enabled": True}],
+        )
+        adapter = TopologySourceAdapter({"request_delay": 0, "domain_delay": 0})
+        crawler = adapter._build_crawler(source)
+        crawler.session = Mock()
+        crawler.session.post.side_effect = requests.RequestException("request failed for payload=secret")
+
+        result_payload, status_code, status_text = crawler.post_json(
+            "https://search.vip.qianlima.com/rest/service/website/search/solr",
+            {"keywords": "会议", "token": "should-not-leak"},
+        )
+
+        self.assertEqual(result_payload, {})
+        self.assertEqual(status_code, 599)
+        self.assertEqual(status_text, "RequestException: request failed")
+        self.assertNotIn("should-not-leak", status_text)
+        self.assertNotIn("SESSION=secret", status_text)
+
+    def test_build_crawler_post_json_never_returns_sensitive_exception_text(self):
+        source = Source(
+            id="qianlima",
+            name="千里马",
+            url="https://www.qianlima.com/",
+            auth_cookies=[{"domain": "qianlima.com", "cookie": "SESSION=secret", "enabled": True}],
+        )
+        adapter = TopologySourceAdapter({"request_delay": 0, "domain_delay": 0})
+        crawler = adapter._build_crawler(source)
+        crawler.session = Mock()
+        crawler.session.post.side_effect = requests.RequestException(
+            "transport failed body=secret headers=X-Trace: secret Bearer abc"
+        )
+
+        result_payload, status_code, status_text = crawler.post_json(
+            "https://search.vip.qianlima.com/rest/service/website/search/solr",
+            {"keywords": "会议"},
+        )
+
+        self.assertEqual(result_payload, {})
+        self.assertEqual(status_code, 599)
+        self.assertEqual(status_text, "RequestException: request failed")
+        self.assertNotIn("body=secret", status_text)
+        self.assertNotIn("Bearer abc", status_text)
+        self.assertNotIn("headers=", status_text)
+
+    def test_build_crawler_get_json_never_returns_sensitive_exception_text(self):
+        source = Source(
+            id="qianlima",
+            name="千里马",
+            url="https://www.qianlima.com/",
+        )
+        adapter = TopologySourceAdapter({"request_delay": 0, "domain_delay": 0})
+        crawler = adapter._build_crawler(source)
+        crawler._request_http = Mock(
+            side_effect=requests.RequestException(
+                "transport failed body=secret headers=X-Trace: secret Bearer abc"
+            )
+        )
+
+        result_payload, status_code, status_text = crawler.get_json(
+            "https://search.vip.qianlima.com/rest/service/website/search/solr"
+        )
+
+        self.assertEqual(result_payload, {})
+        self.assertEqual(status_code, 599)
+        self.assertEqual(status_text, "RequestException: request failed")
+        self.assertNotIn("body=secret", status_text)
+        self.assertNotIn("Bearer abc", status_text)
+        self.assertNotIn("headers=", status_text)
 
     @patch("crawler.url_list.UrlListCrawler._request_url")
     def test_collect_preserves_missing_detail_publish_date_as_empty(self, mock_request_url):

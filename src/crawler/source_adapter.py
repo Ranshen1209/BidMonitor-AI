@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import json
+from contextlib import nullcontext
 from datetime import datetime
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 try:
+    from .qianlima_vip import QIANLIMA_SOURCE_ID, QianlimaVipSearchClient, has_qianlima_cookie
     from .source_models import (
         CrawlResult,
         Notice,
@@ -26,6 +28,7 @@ try:
         requests as url_list_requests,
     )
 except ImportError:  # pragma: no cover
+    from crawler.qianlima_vip import QIANLIMA_SOURCE_ID, QianlimaVipSearchClient, has_qianlima_cookie
     from crawler.source_models import (
         CrawlResult,
         Notice,
@@ -53,7 +56,7 @@ class TopologySourceAdapter:
         self.config = dict(config or {})
         self.config["preserve_missing_publish_date"] = True
 
-    def collect(self, source: Source, stop_event=None) -> CrawlResult:
+    def collect(self, source: Source, stop_event=None, notice_exists=None) -> CrawlResult:
         result = CrawlResult()
         if stop_event and stop_event.is_set():
             return result
@@ -61,264 +64,286 @@ class TopologySourceAdapter:
         try:
             crawler = self._build_crawler(source)
             timestamp = datetime.now().isoformat(timespec="seconds")
-            cookie_used = crawler._get_cookie_for_url(source.url) is not None
-            request_count_before = self._request_call_count(crawler)
-
-            rule = crawler._classify_url(source.url)
-            crawler._respect_rate_limit(source.url)
-            try:
-                html, status_code, status_text = crawler._request_url(source.url)
-            except url_list_requests.RequestException as exc:
-                message = f"{exc.__class__.__name__}: {exc}"
-                result.errors.append(message)
-                result.error_count += 1
-                result.diagnostics.append(
-                    {"url": source.url, "status": "failed", "reason": message, "status_code": 0}
-                )
-                html, status_code, status_text = "", 0, str(exc)
-            initial_fetch_count = max(1, self._request_call_count(crawler) - request_count_before)
-            result.fetched_count = initial_fetch_count
-
-            source_payload_is_json = False
-            topology_seed_html = html
-            structured_bids: list[Any] = []
-            if status_code >= 400:
-                message = f"HTTP {status_code}: {status_text or 'source fetch failed'}"
-                result.errors.append(message)
-                result.error_count += 1
-                result.diagnostics.append(
-                    {"url": source.url, "status": "failed", "reason": message, "status_code": status_code}
-                )
-                topology_seed_html = ""
-            elif crawler._contains_blocked_sign(html, source.url):
-                message = crawler._blocked_reason(html, source.url)
-                result.errors.append(message)
-                result.error_count += 1
-                result.diagnostics.append(
-                    {"url": source.url, "status": "failed", "reason": message, "status_code": status_code}
-                )
-                topology_seed_html = ""
-            else:
-                source_payload_is_json = self._is_json_payload(html)
-                structured_bids = self._structured_bids_from_payload(crawler, html, source.url, timestamp, rule)
-                if source_payload_is_json:
-                    topology_seed_html = ""
-
-            admitted_structured_urls = self._normalized_bid_urls(structured_bids)
-            topology_structured_bids: list[Any] = []
-            detail_failures: list[dict[str, Any]] = []
-            detail_failure_urls: set[str] = set()
-            followed_candidate_urls: set[str] = set()
-            original_request_url = crawler._request_url
-            original_request_http = crawler._request_http
-            original_request_url_with_browser = crawler._request_url_with_browser
-            original_should_follow_candidate = crawler._should_follow_candidate
-            original_sort_candidate_links = crawler._sort_candidate_links
-            had_topology_fetch_failure_callback = hasattr(crawler, "_topology_fetch_failure_callback")
-            original_topology_fetch_failure_callback = getattr(
-                crawler, "_topology_fetch_failure_callback", None
+            force_http_only_qianlima_fallback = False
+            if self._should_use_qianlima_vip_search(source):
+                keywords = self._qianlima_keywords()
+                vip_result = QianlimaVipSearchClient(
+                    crawler,
+                    source,
+                    self.config,
+                    notice_exists=notice_exists,
+                ).collect(keywords, stop_event=stop_event)
+                if vip_result.notices:
+                    return self._enrich_qianlima_vip_result(crawler, source, vip_result, timestamp, stop_event)
+                if vip_result.error_count:
+                    return vip_result
+                force_http_only_qianlima_fallback = True
+            browser_override = (
+                self._force_http_only_fetch_for_qianlima_fallback(crawler)
+                if force_http_only_qianlima_fallback
+                else nullcontext()
             )
-            topology_seed_urls = {
-                link.get("url", "").split("#", 1)[0] for link in crawler._topology_seed_links(source.url)
-            }
+            with browser_override:
+                cookie_used = crawler._get_cookie_for_url(source.url) is not None
+                request_count_before = self._request_call_count(crawler)
 
-            def record_candidate_failure(
-                url: str,
-                response_rule: dict[str, str],
-                reason: str,
-                status_code: int = 0,
-            ) -> None:
-                normalized_url = normalize_notice_url(url)
-                failure_key = normalized_url or url.split("#", 1)[0]
-                page_type = response_rule.get("page_type", "")
-                if page_type != "detail" and failure_key not in followed_candidate_urls:
-                    return
-                if failure_key in detail_failure_urls:
-                    return
-                detail_failure_urls.add(failure_key)
-                failure_kind = "detail"
-                if page_type != "detail":
-                    failure_kind = (
-                        "traversal" if url.split("#", 1)[0] in topology_seed_urls else "candidate"
+                rule = crawler._classify_url(source.url)
+                crawler._respect_rate_limit(source.url)
+                try:
+                    html, status_code, status_text = crawler._request_url(source.url)
+                except url_list_requests.RequestException as exc:
+                    message = f"{exc.__class__.__name__}: {exc}"
+                    result.errors.append(message)
+                    result.error_count += 1
+                    result.diagnostics.append(
+                        {"url": source.url, "status": "failed", "reason": message, "status_code": 0}
                     )
-                detail_failures.append(
+                    html, status_code, status_text = "", 0, str(exc)
+                initial_fetch_count = max(1, self._request_call_count(crawler) - request_count_before)
+                result.fetched_count = initial_fetch_count
+
+                source_payload_is_json = False
+                topology_seed_html = html
+                structured_bids: list[Any] = []
+                if status_code >= 400:
+                    message = f"HTTP {status_code}: {status_text or 'source fetch failed'}"
+                    result.errors.append(message)
+                    result.error_count += 1
+                    result.diagnostics.append(
+                        {"url": source.url, "status": "failed", "reason": message, "status_code": status_code}
+                    )
+                    topology_seed_html = ""
+                elif crawler._contains_blocked_sign(html, source.url):
+                    message = crawler._blocked_reason(html, source.url)
+                    result.errors.append(message)
+                    result.error_count += 1
+                    result.diagnostics.append(
+                        {"url": source.url, "status": "failed", "reason": message, "status_code": status_code}
+                    )
+                    topology_seed_html = ""
+                else:
+                    source_payload_is_json = self._is_json_payload(html)
+                    structured_bids = self._structured_bids_from_payload(crawler, html, source.url, timestamp, rule)
+                    if source_payload_is_json:
+                        topology_seed_html = ""
+
+                admitted_structured_urls = self._normalized_bid_urls(structured_bids)
+                topology_structured_bids: list[Any] = []
+                detail_failures: list[dict[str, Any]] = []
+                detail_failure_urls: set[str] = set()
+                followed_candidate_urls: set[str] = set()
+                original_request_url = crawler._request_url
+                original_request_http = crawler._request_http
+                original_request_url_with_browser = crawler._request_url_with_browser
+                original_should_follow_candidate = crawler._should_follow_candidate
+                original_sort_candidate_links = crawler._sort_candidate_links
+                had_topology_fetch_failure_callback = hasattr(crawler, "_topology_fetch_failure_callback")
+                original_topology_fetch_failure_callback = getattr(
+                    crawler, "_topology_fetch_failure_callback", None
+                )
+                topology_seed_urls = {
+                    link.get("url", "").split("#", 1)[0] for link in crawler._topology_seed_links(source.url)
+                }
+
+                def record_candidate_failure(
+                    url: str,
+                    response_rule: dict[str, str],
+                    reason: str,
+                    status_code: int = 0,
+                ) -> None:
+                    normalized_url = normalize_notice_url(url)
+                    failure_key = normalized_url or url.split("#", 1)[0]
+                    page_type = response_rule.get("page_type", "")
+                    if page_type != "detail" and failure_key not in followed_candidate_urls:
+                        return
+                    if failure_key in detail_failure_urls:
+                        return
+                    detail_failure_urls.add(failure_key)
+                    failure_kind = "detail"
+                    if page_type != "detail":
+                        failure_kind = (
+                            "traversal" if url.split("#", 1)[0] in topology_seed_urls else "candidate"
+                        )
+                    detail_failures.append(
+                        {
+                            "url": url,
+                            "status": "failed",
+                            "reason": f"{failure_kind} fetch failed: {reason}",
+                            "status_code": status_code,
+                            "page_type": page_type,
+                        }
+                    )
+
+                def record_topology_fetch_failure(
+                    page_url: str,
+                    reason: str,
+                    status_code: int = 0,
+                    **_context: Any,
+                ) -> None:
+                    record_candidate_failure(page_url, crawler._classify_url(page_url), reason, status_code)
+
+                def request_url_and_collect_json(url: str):
+                    normalized_url = normalize_notice_url(url)
+                    if normalized_url and normalized_url in admitted_structured_urls:
+                        return "", 204, "Skipped admitted structured URL"
+                    request_url_and_collect_json.call_count += 1
+                    response_rule = crawler._classify_url(url)
+                    current_request_http = crawler._request_http
+                    crawler._request_http = original_request_http
+                    try:
+                        response_html, response_status, response_text = original_request_url(url)
+                    finally:
+                        crawler._request_http = current_request_http
+                    return collect_json_response(url, response_rule, response_html, response_status, response_text)
+
+                def request_http_and_collect_json(
+                    method: str,
+                    url: str,
+                    params: dict[str, Any] | None = None,
+                    data: dict[str, Any] | None = None,
+                ):
+                    normalized_url = normalize_notice_url(url)
+                    if normalized_url and normalized_url in admitted_structured_urls:
+                        return "", 204, "Skipped admitted structured URL"
+                    request_http_and_collect_json.call_count += 1
+                    response_rule = crawler._classify_url(url)
+                    response_html, response_status, response_text = original_request_http(
+                        method,
+                        url,
+                        params=params,
+                        data=data,
+                    )
+                    return collect_json_response(url, response_rule, response_html, response_status, response_text)
+
+                def collect_json_response(
+                    url: str,
+                    response_rule: dict[str, str],
+                    response_html: str,
+                    response_status: int,
+                    response_text: str,
+                ):
+                    response_blocked = response_status < 400 and crawler._contains_blocked_sign(response_html, url)
+                    if response_status >= 400 or response_blocked:
+                        return response_html, response_status, response_text
+                    if response_status < 400:
+                        response_structured_bids = self._structured_bids_from_payload(
+                            crawler, response_html, url, timestamp, response_rule
+                        )
+                        topology_structured_bids.extend(response_structured_bids)
+                        admitted_structured_urls.update(self._normalized_bid_urls(response_structured_bids))
+                        if self._is_json_payload(response_html):
+                            return "", response_status, response_text
+                    return response_html, response_status, response_text
+
+                def request_url_with_browser_and_count(url: str):
+                    request_url_with_browser_and_count.call_count += 1
+                    return original_request_url_with_browser(url)
+
+                def should_follow_unadmitted_candidate(page_url: str, candidate_url: str, depth: int) -> bool:
+                    absolute_candidate = urljoin(page_url, candidate_url)
+                    if _is_qianlima_vip_search_endpoint_url(absolute_candidate):
+                        return False
+                    normalized_candidate = normalize_notice_url(absolute_candidate)
+                    if normalized_candidate and normalized_candidate in admitted_structured_urls:
+                        return False
+                    should_follow = original_should_follow_candidate(page_url, candidate_url, depth)
+                    if should_follow:
+                        followed_candidate_urls.add(normalized_candidate or absolute_candidate.split("#", 1)[0])
+                    return should_follow
+
+                def sort_with_topology_seed_priority(page_url: str, links: list[dict[str, str]]) -> list[dict[str, str]]:
+                    sorted_links = original_sort_candidate_links(page_url, links)
+                    seed_links = []
+                    other_links = []
+                    for link in sorted_links:
+                        link_url = link.get("url", "").split("#", 1)[0]
+                        if link_url in topology_seed_urls:
+                            seed_links.append(link)
+                        else:
+                            other_links.append(link)
+                    return seed_links + other_links
+
+                request_url_and_collect_json.call_count = request_count_before + initial_fetch_count
+                request_http_and_collect_json.call_count = 0
+                request_url_with_browser_and_count.call_count = 0
+                crawler._request_url = request_url_and_collect_json
+                crawler._request_http = request_http_and_collect_json
+                crawler._request_url_with_browser = request_url_with_browser_and_count
+                crawler._should_follow_candidate = should_follow_unadmitted_candidate
+                crawler._sort_candidate_links = sort_with_topology_seed_priority
+                crawler._topology_fetch_failure_callback = record_topology_fetch_failure
+                try:
+                    legacy_bids = crawler._crawl_topology_from_url(
+                        source.url,
+                        "" if source_payload_is_json else topology_seed_html,
+                        timestamp,
+                        rule,
+                        cookie_used=cookie_used,
+                    )
+                    request_delta = (
+                        self._request_call_count(crawler)
+                        - request_count_before
+                        + request_http_and_collect_json.call_count
+                    )
+                    browser_request_delta = request_url_with_browser_and_count.call_count
+                finally:
+                    crawler._request_url = original_request_url
+                    crawler._request_http = original_request_http
+                    crawler._request_url_with_browser = original_request_url_with_browser
+                    crawler._should_follow_candidate = original_should_follow_candidate
+                    crawler._sort_candidate_links = original_sort_candidate_links
+                    if had_topology_fetch_failure_callback:
+                        crawler._topology_fetch_failure_callback = original_topology_fetch_failure_callback
+                    elif hasattr(crawler, "_topology_fetch_failure_callback"):
+                        delattr(crawler, "_topology_fetch_failure_callback")
+                total_fetch_delta = request_delta + browser_request_delta
+                if total_fetch_delta > 0:
+                    result.fetched_count = total_fetch_delta
+                result.diagnostics.extend(detail_failures)
+                for failure in detail_failures:
+                    result.errors.append(failure["reason"])
+                result.skipped_count += len(detail_failures)
+                result.error_count += len(detail_failures)
+
+                total_candidates = (
+                    len(structured_bids)
+                    + len(topology_structured_bids)
+                    + len(legacy_bids)
+                    + len(detail_failures)
+                )
+                result.candidate_count = max(
+                    total_candidates,
+                    len(crawler._topology_seed_links(source.url)),
+                )
+
+                deduplicator = NoticeDeduplicator()
+                for bid in structured_bids + topology_structured_bids + legacy_bids:
+                    notice = self._notice_from_bid(source, bid)
+                    if not notice.title or not _is_admissible_notice_detail_url(notice.detail_url):
+                        result.skipped_count += 1
+                        continue
+                    if not deduplicator.add(notice):
+                        result.skipped_count += 1
+                        continue
+                    result.notices.append(notice)
+
+                result.parsed_count = len(result.notices)
+                summary_status = "success"
+                if result.errors and result.notices:
+                    summary_status = "partial"
+                elif result.errors:
+                    summary_status = "failed"
+                elif not result.notices:
+                    summary_status = "skipped"
+                result.diagnostics.append(
                     {
-                        "url": url,
-                        "status": "failed",
-                        "reason": f"{failure_kind} fetch failed: {reason}",
-                        "status_code": status_code,
-                        "page_type": page_type,
+                        "url": source.url,
+                        "status": summary_status,
+                        "candidate_count": result.candidate_count,
+                        "parsed_count": result.parsed_count,
                     }
                 )
-
-            def record_topology_fetch_failure(
-                page_url: str,
-                reason: str,
-                status_code: int = 0,
-                **_context: Any,
-            ) -> None:
-                record_candidate_failure(page_url, crawler._classify_url(page_url), reason, status_code)
-
-            def request_url_and_collect_json(url: str):
-                normalized_url = normalize_notice_url(url)
-                if normalized_url and normalized_url in admitted_structured_urls:
-                    return "", 204, "Skipped admitted structured URL"
-                request_url_and_collect_json.call_count += 1
-                response_rule = crawler._classify_url(url)
-                current_request_http = crawler._request_http
-                crawler._request_http = original_request_http
-                try:
-                    response_html, response_status, response_text = original_request_url(url)
-                finally:
-                    crawler._request_http = current_request_http
-                return collect_json_response(url, response_rule, response_html, response_status, response_text)
-
-            def request_http_and_collect_json(
-                method: str,
-                url: str,
-                params: dict[str, Any] | None = None,
-                data: dict[str, Any] | None = None,
-            ):
-                normalized_url = normalize_notice_url(url)
-                if normalized_url and normalized_url in admitted_structured_urls:
-                    return "", 204, "Skipped admitted structured URL"
-                request_http_and_collect_json.call_count += 1
-                response_rule = crawler._classify_url(url)
-                response_html, response_status, response_text = original_request_http(
-                    method,
-                    url,
-                    params=params,
-                    data=data,
-                )
-                return collect_json_response(url, response_rule, response_html, response_status, response_text)
-
-            def collect_json_response(
-                url: str,
-                response_rule: dict[str, str],
-                response_html: str,
-                response_status: int,
-                response_text: str,
-            ):
-                response_blocked = response_status < 400 and crawler._contains_blocked_sign(response_html, url)
-                if response_status >= 400 or response_blocked:
-                    return response_html, response_status, response_text
-                if response_status < 400:
-                    response_structured_bids = self._structured_bids_from_payload(
-                        crawler, response_html, url, timestamp, response_rule
-                    )
-                    topology_structured_bids.extend(response_structured_bids)
-                    admitted_structured_urls.update(self._normalized_bid_urls(response_structured_bids))
-                    if self._is_json_payload(response_html):
-                        return "", response_status, response_text
-                return response_html, response_status, response_text
-
-            def request_url_with_browser_and_count(url: str):
-                request_url_with_browser_and_count.call_count += 1
-                return original_request_url_with_browser(url)
-
-            def should_follow_unadmitted_candidate(page_url: str, candidate_url: str, depth: int) -> bool:
-                absolute_candidate = urljoin(page_url, candidate_url)
-                normalized_candidate = normalize_notice_url(absolute_candidate)
-                if normalized_candidate and normalized_candidate in admitted_structured_urls:
-                    return False
-                should_follow = original_should_follow_candidate(page_url, candidate_url, depth)
-                if should_follow:
-                    followed_candidate_urls.add(normalized_candidate or absolute_candidate.split("#", 1)[0])
-                return should_follow
-
-            def sort_with_topology_seed_priority(page_url: str, links: list[dict[str, str]]) -> list[dict[str, str]]:
-                sorted_links = original_sort_candidate_links(page_url, links)
-                seed_links = []
-                other_links = []
-                for link in sorted_links:
-                    link_url = link.get("url", "").split("#", 1)[0]
-                    if link_url in topology_seed_urls:
-                        seed_links.append(link)
-                    else:
-                        other_links.append(link)
-                return seed_links + other_links
-
-            request_url_and_collect_json.call_count = request_count_before + initial_fetch_count
-            request_http_and_collect_json.call_count = 0
-            request_url_with_browser_and_count.call_count = 0
-            crawler._request_url = request_url_and_collect_json
-            crawler._request_http = request_http_and_collect_json
-            crawler._request_url_with_browser = request_url_with_browser_and_count
-            crawler._should_follow_candidate = should_follow_unadmitted_candidate
-            crawler._sort_candidate_links = sort_with_topology_seed_priority
-            crawler._topology_fetch_failure_callback = record_topology_fetch_failure
-            try:
-                legacy_bids = crawler._crawl_topology_from_url(
-                    source.url,
-                    "" if source_payload_is_json else topology_seed_html,
-                    timestamp,
-                    rule,
-                    cookie_used=cookie_used,
-                )
-                request_delta = (
-                    self._request_call_count(crawler)
-                    - request_count_before
-                    + request_http_and_collect_json.call_count
-                )
-                browser_request_delta = request_url_with_browser_and_count.call_count
-            finally:
-                crawler._request_url = original_request_url
-                crawler._request_http = original_request_http
-                crawler._request_url_with_browser = original_request_url_with_browser
-                crawler._should_follow_candidate = original_should_follow_candidate
-                crawler._sort_candidate_links = original_sort_candidate_links
-                if had_topology_fetch_failure_callback:
-                    crawler._topology_fetch_failure_callback = original_topology_fetch_failure_callback
-                elif hasattr(crawler, "_topology_fetch_failure_callback"):
-                    delattr(crawler, "_topology_fetch_failure_callback")
-            total_fetch_delta = request_delta + browser_request_delta
-            if total_fetch_delta > 0:
-                result.fetched_count = total_fetch_delta
-            result.diagnostics.extend(detail_failures)
-            for failure in detail_failures:
-                result.errors.append(failure["reason"])
-            result.skipped_count += len(detail_failures)
-            result.error_count += len(detail_failures)
-
-            total_candidates = (
-                len(structured_bids)
-                + len(topology_structured_bids)
-                + len(legacy_bids)
-                + len(detail_failures)
-            )
-            result.candidate_count = max(
-                total_candidates,
-                len(crawler._topology_seed_links(source.url)),
-            )
-
-            deduplicator = NoticeDeduplicator()
-            for bid in structured_bids + topology_structured_bids + legacy_bids:
-                notice = self._notice_from_bid(source, bid)
-                if not notice.title or not _is_admissible_notice_detail_url(notice.detail_url):
-                    result.skipped_count += 1
-                    continue
-                if not deduplicator.add(notice):
-                    result.skipped_count += 1
-                    continue
-                result.notices.append(notice)
-
-            result.parsed_count = len(result.notices)
-            summary_status = "success"
-            if result.errors and result.notices:
-                summary_status = "partial"
-            elif result.errors:
-                summary_status = "failed"
-            elif not result.notices:
-                summary_status = "skipped"
-            result.diagnostics.append(
-                {
-                    "url": source.url,
-                    "status": summary_status,
-                    "candidate_count": result.candidate_count,
-                    "parsed_count": result.parsed_count,
-                }
-            )
-            return result
+                return result
         except Exception as exc:
             result.errors.append(f"{exc.__class__.__name__}: {exc}")
             result.error_count = 1
@@ -405,9 +430,232 @@ class TopologySourceAdapter:
             "domain_delay": domain_delay,
         }
         crawler = UrlListCrawler(config, source_config)
+
+        def sanitized_exception_text(exc: Exception) -> str:
+            return f"{exc.__class__.__name__}: request failed"
+
+        def post_json(url: str, payload: dict[str, Any]) -> tuple[dict[str, Any], int, str]:
+            headers = crawler._get_headers()
+            headers["Content-Type"] = "application/json"
+            cookie = crawler._get_cookie_for_url(url)
+            if cookie:
+                headers["Cookie"] = cookie
+            crawler._emit_info(f"[URL请求] {crawler.name}: HTTP POST JSON {crawler._short_url(url)}")
+            try:
+                response = crawler.session.post(
+                    url,
+                    json=payload,
+                    headers=headers,
+                    timeout=crawler.timeout,
+                    verify=False,
+                    allow_redirects=True,
+                )
+            except (url_list_requests.RequestException, Exception) as exc:
+                return {}, 599, sanitized_exception_text(exc)
+            response.encoding = response.apparent_encoding or response.encoding or "utf-8"
+            try:
+                return json.loads(response.text or "{}"), response.status_code, response.reason
+            except (TypeError, ValueError):
+                return {}, response.status_code, response.reason
+
+        def get_json(url: str) -> tuple[dict[str, Any], int, str]:
+            try:
+                html, status_code, status_text = crawler._request_http("GET", url)
+            except (url_list_requests.RequestException, Exception) as exc:
+                return {}, 599, sanitized_exception_text(exc)
+            try:
+                return json.loads(html or "{}"), status_code, status_text
+            except (TypeError, ValueError):
+                return {}, status_code, status_text
+
+        crawler.post_json = post_json
+        crawler.get_json = get_json
         if source.topology:
             crawler.site_topologies = [source.topology]
         return crawler
+
+    def _should_use_qianlima_vip_search(self, source: Source) -> bool:
+        if source.id != QIANLIMA_SOURCE_ID:
+            return False
+        if self.config.get("qianlima_vip_search_enabled", True) is False:
+            return False
+        return has_qianlima_cookie(source.auth_cookies or self.config.get("auth_cookies", []))
+
+    def _force_http_only_fetch_for_qianlima_fallback(self, crawler: UrlListCrawler):
+        original_browser_mode_enabled = crawler._browser_mode_enabled
+        original_prefers_browser_fetch = crawler._prefers_browser_fetch
+        original_should_retry_browser_after_no_progress = crawler._should_retry_browser_after_no_progress
+        original_should_retry_browser_for_fetch_failure = crawler._should_retry_browser_for_fetch_failure
+
+        def restore() -> None:
+            crawler._browser_mode_enabled = original_browser_mode_enabled
+            crawler._prefers_browser_fetch = original_prefers_browser_fetch
+            crawler._should_retry_browser_after_no_progress = original_should_retry_browser_after_no_progress
+            crawler._should_retry_browser_for_fetch_failure = original_should_retry_browser_for_fetch_failure
+
+        class _HttpOnlyFallbackScope:
+            def __enter__(self_inner):
+                crawler._browser_mode_enabled = lambda: False
+                crawler._prefers_browser_fetch = lambda _url: False
+                crawler._should_retry_browser_after_no_progress = lambda _url, _html: False
+                crawler._should_retry_browser_for_fetch_failure = lambda _url: False
+                return crawler
+
+            def __exit__(self_inner, exc_type, exc, tb):
+                restore()
+                return False
+
+        return _HttpOnlyFallbackScope()
+
+    def _qianlima_keywords(self) -> list[str]:
+        raw_keywords = self.config.get("search_keywords") or self.config.get("keywords") or []
+        if isinstance(raw_keywords, str):
+            raw_keywords = [item.strip() for item in raw_keywords.split(",")]
+        keywords = []
+        seen = set()
+        for item in raw_keywords:
+            keyword = str(item).strip()
+            if keyword and keyword not in seen:
+                seen.add(keyword)
+                keywords.append(keyword)
+        return keywords
+
+    def _enrich_qianlima_vip_result(
+        self,
+        crawler: UrlListCrawler,
+        source: Source,
+        vip_result: CrawlResult,
+        timestamp: str,
+        stop_event=None,
+    ) -> CrawlResult:
+        result = CrawlResult(
+            fetched_count=vip_result.fetched_count,
+            candidate_count=vip_result.candidate_count,
+            skipped_count=vip_result.skipped_count,
+            error_count=vip_result.error_count,
+            errors=list(vip_result.errors),
+            diagnostics=list(vip_result.diagnostics),
+        )
+        deduplicator = NoticeDeduplicator()
+        enrichment_issues = 0
+        for search_notice in vip_result.notices:
+            if stop_event and stop_event.is_set():
+                break
+            detail_notice, detail_diagnostic, attempted_fetch = self._fetch_qianlima_detail_notice(
+                crawler,
+                source,
+                search_notice,
+                timestamp,
+            )
+            if attempted_fetch:
+                result.fetched_count += 1
+            if detail_diagnostic is not None:
+                enrichment_issues += 1
+                result.diagnostics.append(detail_diagnostic)
+                detail_status = detail_diagnostic.get("status")
+                detail_reason = detail_diagnostic.get("reason", "")
+                if detail_status == "failed":
+                    result.error_count += 1
+                    if detail_reason:
+                        result.errors.append(detail_reason)
+                elif detail_status == "skipped":
+                    result.skipped_count += 1
+            if detail_notice is not None:
+                notice = self._merge_qianlima_detail_notice(search_notice, detail_notice)
+            else:
+                notice = search_notice
+            if not deduplicator.add(notice):
+                result.skipped_count += 1
+                continue
+            result.notices.append(notice)
+        result.parsed_count = len(result.notices)
+        summary_status = "success"
+        if result.errors and result.notices:
+            summary_status = "partial"
+        elif result.errors:
+            summary_status = "failed"
+        elif enrichment_issues and result.notices:
+            summary_status = "partial"
+        elif not result.notices:
+            summary_status = "skipped"
+        result.diagnostics.append(
+            {
+                "url": source.url,
+                "status": summary_status,
+                "candidate_count": result.candidate_count,
+                "parsed_count": result.parsed_count,
+                "mode": "qianlima_vip_search",
+            }
+        )
+        return result
+
+    def _fetch_qianlima_detail_notice(
+        self,
+        crawler: UrlListCrawler,
+        source: Source,
+        search_notice: Notice,
+        timestamp: str,
+    ) -> tuple[Notice | None, dict[str, Any] | None, bool]:
+        detail_url = search_notice.detail_url
+        if not _is_admissible_notice_detail_url(detail_url):
+            return None, None, False
+        crawler._respect_rate_limit(detail_url)
+        try:
+            html, status_code, _status_text = crawler._request_url(detail_url)
+        except url_list_requests.RequestException as exc:
+            return None, self._qianlima_detail_diagnostic(detail_url, "failed", exc.__class__.__name__), True
+        if status_code >= 400:
+            return None, self._qianlima_detail_diagnostic(detail_url, "failed", f"HTTP {status_code}", status_code), True
+        if crawler._contains_blocked_sign(html, detail_url):
+            return None, self._qianlima_detail_diagnostic(detail_url, "skipped", "blocked detail page"), True
+        for bid in crawler._parse_page(html, detail_url, timestamp):
+            bid_url = normalize_notice_url(getattr(bid, "url", ""))
+            if bid_url and bid_url == normalize_notice_url(detail_url):
+                detail_notice = self._notice_from_bid(source, bid)
+                detail_notice.source_item_id = search_notice.source_item_id
+                return detail_notice, None, True
+        return None, self._qianlima_detail_diagnostic(detail_url, "skipped", "detail parse miss"), True
+
+    def _qianlima_detail_diagnostic(
+        self,
+        detail_url: str,
+        status: str,
+        reason: str,
+        status_code: int = 0,
+    ) -> dict[str, Any]:
+        diagnostic = {
+            "url": detail_url,
+            "status": status,
+            "reason": f"qianlima detail enrichment {status}: {reason}",
+            "stage": "qianlima_detail_enrichment",
+        }
+        if status_code:
+            diagnostic["status_code"] = status_code
+        return diagnostic
+
+    def _merge_qianlima_detail_notice(self, search_notice: Notice, detail_notice: Notice) -> Notice:
+        merged_raw: dict[str, Any] = {}
+        search_raw = dict((search_notice.raw or {}).get("qianlima", {}))
+        if search_raw:
+            merged_raw["qianlima_search"] = search_raw
+        detail_raw = dict((detail_notice.raw or {}).get("legacy", {}))
+        if detail_raw:
+            merged_raw["detail"] = detail_raw
+        return Notice(
+            source_id=search_notice.source_id,
+            source_name=search_notice.source_name,
+            source_item_id=search_notice.source_item_id or detail_notice.source_item_id,
+            title=detail_notice.title or search_notice.title,
+            detail_url=detail_notice.detail_url or search_notice.detail_url,
+            publish_date=detail_notice.publish_date or search_notice.publish_date,
+            notice_type=detail_notice.notice_type or search_notice.notice_type,
+            purchaser=detail_notice.purchaser or search_notice.purchaser,
+            region=detail_notice.region or search_notice.region,
+            content=detail_notice.content or search_notice.content,
+            content_hash=detail_notice.content_hash or search_notice.content_hash,
+            raw=merged_raw,
+            quality_flags=list(dict.fromkeys((search_notice.quality_flags or []) + (detail_notice.quality_flags or []))),
+        )
 
     def _notice_from_bid(self, source: Source, bid) -> Notice:
         content = getattr(bid, "content", "") or ""
@@ -448,6 +696,15 @@ def _raw_value_has_evidence(value: Any) -> bool:
     if isinstance(value, dict):
         return any(_raw_value_has_evidence(item) for item in value.values())
     return True
+
+
+def _is_qianlima_vip_search_endpoint_url(value: str) -> bool:
+    parsed = urlparse(str(value or "").strip())
+    return (
+        parsed.scheme in {"http", "https"}
+        and parsed.netloc == "search.vip.qianlima.com"
+        and parsed.path == "/rest/service/website/search/solr"
+    )
 
 
 def _is_fetchable_notice_url(value: str, page_url: str) -> bool:

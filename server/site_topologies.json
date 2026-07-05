@@ -805,6 +805,9 @@
       "entry_url": "https://www.qianlima.com/",
       "allowed_hosts": [
         "www.qianlima.com",
+        "search.vip.qianlima.com",
+        "vip.qianlima.com",
+        "home.qianlima.com",
         "search.qianlima.com",
         "wap.qianlima.com",
         "gw-static.qianlima.com",
@@ -822,6 +825,9 @@
       ],
       "detail_url_regex": [
         "^https?://www\\.qianlima\\.com/(?:bid-(?:\\d+-)?\\d+\\.html|zb/detail/\\d{8}_(?:\\d+-)?\\d+\\.html)$"
+      ],
+      "search_url_regex": [
+        "^https?://search\\.vip\\.qianlima\\.com/rest/service/website/search/solr(?:\\?.*)?$"
       ],
       "candidate_extraction": [
         "window.__NUXT__.state.bidding.listData[] fields pcUrl,title,tname,updatetime,url,wapUrl",

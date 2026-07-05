@@ -490,12 +490,30 @@ class TopologySourceAdapter:
             diagnostics=list(vip_result.diagnostics),
         )
         deduplicator = NoticeDeduplicator()
+        enrichment_issues = 0
         for search_notice in vip_result.notices:
             if stop_event and stop_event.is_set():
                 break
-            detail_notice = self._fetch_qianlima_detail_notice(crawler, source, search_notice, timestamp)
-            if detail_notice is not None:
+            detail_notice, detail_diagnostic, attempted_fetch = self._fetch_qianlima_detail_notice(
+                crawler,
+                source,
+                search_notice,
+                timestamp,
+            )
+            if attempted_fetch:
                 result.fetched_count += 1
+            if detail_diagnostic is not None:
+                enrichment_issues += 1
+                result.diagnostics.append(detail_diagnostic)
+                detail_status = detail_diagnostic.get("status")
+                detail_reason = detail_diagnostic.get("reason", "")
+                if detail_status == "failed":
+                    result.error_count += 1
+                    if detail_reason:
+                        result.errors.append(detail_reason)
+                elif detail_status == "skipped":
+                    result.skipped_count += 1
+            if detail_notice is not None:
                 notice = self._merge_qianlima_detail_notice(search_notice, detail_notice)
             else:
                 notice = search_notice
@@ -504,10 +522,19 @@ class TopologySourceAdapter:
                 continue
             result.notices.append(notice)
         result.parsed_count = len(result.notices)
+        summary_status = "success"
+        if result.errors and result.notices:
+            summary_status = "partial"
+        elif result.errors:
+            summary_status = "failed"
+        elif enrichment_issues and result.notices:
+            summary_status = "partial"
+        elif not result.notices:
+            summary_status = "skipped"
         result.diagnostics.append(
             {
                 "url": source.url,
-                "status": "success" if result.notices else "skipped",
+                "status": summary_status,
                 "candidate_count": result.candidate_count,
                 "parsed_count": result.parsed_count,
                 "mode": "qianlima_vip_search",
@@ -521,24 +548,43 @@ class TopologySourceAdapter:
         source: Source,
         search_notice: Notice,
         timestamp: str,
-    ) -> Notice | None:
+    ) -> tuple[Notice | None, dict[str, Any] | None, bool]:
         detail_url = search_notice.detail_url
         if not _is_admissible_notice_detail_url(detail_url):
-            return None
+            return None, None, False
         crawler._respect_rate_limit(detail_url)
         try:
             html, status_code, _status_text = crawler._request_url(detail_url)
-        except url_list_requests.RequestException:
-            return None
-        if status_code >= 400 or crawler._contains_blocked_sign(html, detail_url):
-            return None
+        except url_list_requests.RequestException as exc:
+            return None, self._qianlima_detail_diagnostic(detail_url, "failed", exc.__class__.__name__), True
+        if status_code >= 400:
+            return None, self._qianlima_detail_diagnostic(detail_url, "failed", f"HTTP {status_code}", status_code), True
+        if crawler._contains_blocked_sign(html, detail_url):
+            return None, self._qianlima_detail_diagnostic(detail_url, "skipped", "blocked detail page"), True
         for bid in crawler._parse_page(html, detail_url, timestamp):
             bid_url = normalize_notice_url(getattr(bid, "url", ""))
             if bid_url and bid_url == normalize_notice_url(detail_url):
                 detail_notice = self._notice_from_bid(source, bid)
                 detail_notice.source_item_id = search_notice.source_item_id
-                return detail_notice
-        return None
+                return detail_notice, None, True
+        return None, self._qianlima_detail_diagnostic(detail_url, "skipped", "detail parse miss"), True
+
+    def _qianlima_detail_diagnostic(
+        self,
+        detail_url: str,
+        status: str,
+        reason: str,
+        status_code: int = 0,
+    ) -> dict[str, Any]:
+        diagnostic = {
+            "url": detail_url,
+            "status": status,
+            "reason": f"qianlima detail enrichment {status}: {reason}",
+            "stage": "qianlima_detail_enrichment",
+        }
+        if status_code:
+            diagnostic["status_code"] = status_code
+        return diagnostic
 
     def _merge_qianlima_detail_notice(self, search_notice: Notice, detail_notice: Notice) -> Notice:
         merged_raw = dict(search_notice.raw or {})

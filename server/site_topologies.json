@@ -851,8 +851,11 @@
         "需要项目通权限才能查阅"
       ],
       "search": {
-        "method": "POST",
-        "url": "https://search.vip.qianlima.com/rest/service/website/search/solr"
+        "method": "GET",
+        "url": "https://search.qianlima.com/",
+        "params": [
+          "q"
+        ]
       },
       "admission_policy": "list public SSR; observed detail partial/masked, do not infer hidden fields",
       "block_policy": "project permission/VIP/login pages are diagnostic only, not BidInfo"

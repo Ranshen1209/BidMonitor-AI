@@ -58,3 +58,56 @@
 
 - Detail enrichment counts a detail fetch only when the detail request yields a parsed matching notice; fallback-to-search cases intentionally keep the search result without adding a new error.
 - The broader suite still emits existing `datetime.utcnow()` deprecation warnings from `src/database/storage.py`, outside this task’s allowed scope.
+
+## Review Fix Follow-up
+
+### Fix Summary
+
+- Restored the generic Qianlima topology `search` stanza to the public GET endpoint so topology fallback no longer enqueues the VIP POST endpoint.
+- Added an adapter regression that keeps VIP search classification via `search_url_regex` while proving generic fallback does not call `search.vip.qianlima.com`.
+- Updated VIP detail enrichment accounting so attempted detail fetches count even when detail fetch/parsing fails and the adapter falls back to the search notice.
+- Added sanitized enrichment diagnostics for failed/skipped detail attempts without echoing raw VIP payload fields.
+
+### RED Evidence
+
+- Review diff/package showed `server/site_topologies.json` had changed the generic Qianlima `search` block to `POST https://search.vip.qianlima.com/rest/service/website/search/solr`, which would enqueue the VIP endpoint from generic topology fallback.
+- `tests/test_source_adapter.py::TopologySourceAdapterTests::test_collect_qianlima_reports_failed_detail_enrichment_attempt`
+  - Failed with `AssertionError: 1 != 2`
+  - Showed `TopologySourceAdapter` only counted successful detail parses, not attempted detail fetches that fall back to the search notice.
+
+### GREEN Evidence
+
+- `tests/test_source_adapter.py::TopologySourceAdapterTests::test_collect_qianlima_empty_vip_result_falls_back_without_generic_vip_search`
+  - Passed with generic fallback issuing only `GET https://search.qianlima.com/` and never requesting the VIP endpoint.
+- `tests/test_source_adapter.py::TopologySourceAdapterTests::test_collect_qianlima_reports_failed_detail_enrichment_attempt`
+  - Passed with the fallback search notice preserved, `fetched_count == 2`, and a sanitized detail-enrichment diagnostic recorded for the failed detail attempt.
+- `src/crawler/source_adapter.py`
+  - `_enrich_qianlima_vip_result()` now records attempted detail fetches, promotes enrichment failures/skips into diagnostics and counters, and marks the summary as `partial` when fallback notices hide a detail-enrichment issue.
+  - `_fetch_qianlima_detail_notice()` now returns `(notice, diagnostic, attempted_fetch)` so HTTP 4xx/5xx, blocked pages, request exceptions, and parse misses are surfaced without leaking raw payload data.
+- `server/site_topologies.json`
+  - Qianlima generic `search` reverted to public GET search while retaining VIP endpoint classification through `search_url_regex`.
+
+### Test Outputs
+
+- `.venv/bin/python -m pytest tests/test_source_adapter.py::TopologySourceAdapterTests::test_collect_qianlima_empty_vip_result_falls_back_without_generic_vip_search -q`
+  - `1 passed in 0.12s`
+- `.venv/bin/python -m pytest tests/test_source_adapter.py::TopologySourceAdapterTests::test_collect_qianlima_reports_failed_detail_enrichment_attempt -q`
+  - RED: `1 failed in 0.14s` (`AssertionError: 1 != 2`)
+  - GREEN: `1 passed in 0.12s`
+- `.venv/bin/python -m pytest tests/test_source_adapter.py -q`
+  - `40 passed, 11 subtests passed in 0.22s`
+- `.venv/bin/python -m pytest tests/test_qianlima_vip.py tests/test_source_adapter.py tests/test_source_crawler.py::CrawlRunnerTests tests/test_url_list_crawler.py::UrlListCrawlerTests::test_qianlima_vip_search_endpoint_is_classified_as_search -q`
+  - `61 passed, 4 warnings, 11 subtests passed in 0.26s`
+- `git diff --check`
+  - clean
+
+### Files Changed
+
+- `src/crawler/source_adapter.py`
+- `server/site_topologies.json`
+- `tests/test_source_adapter.py`
+- `.superpowers/sdd/task-3-qianlima-report.md`
+
+### Concerns
+
+- The required suite is clean, but the broader repo still emits the pre-existing `datetime.utcnow()` deprecation warnings in `src/database/storage.py`, which remains outside this task’s allowed write scope.

@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 try:
     from .qianlima_vip import QIANLIMA_SOURCE_ID, QianlimaVipSearchClient, has_qianlima_cookie
@@ -232,6 +232,8 @@ class TopologySourceAdapter:
 
             def should_follow_unadmitted_candidate(page_url: str, candidate_url: str, depth: int) -> bool:
                 absolute_candidate = urljoin(page_url, candidate_url)
+                if _is_qianlima_vip_search_endpoint_url(absolute_candidate):
+                    return False
                 normalized_candidate = normalize_notice_url(absolute_candidate)
                 if normalized_candidate and normalized_candidate in admitted_structured_urls:
                     return False
@@ -587,8 +589,10 @@ class TopologySourceAdapter:
         return diagnostic
 
     def _merge_qianlima_detail_notice(self, search_notice: Notice, detail_notice: Notice) -> Notice:
-        merged_raw = dict(search_notice.raw or {})
-        merged_raw["qianlima_search"] = dict((search_notice.raw or {}).get("qianlima", {}))
+        merged_raw: dict[str, Any] = {}
+        search_raw = dict((search_notice.raw or {}).get("qianlima", {}))
+        if search_raw:
+            merged_raw["qianlima_search"] = search_raw
         detail_raw = dict((detail_notice.raw or {}).get("legacy", {}))
         if detail_raw:
             merged_raw["detail"] = detail_raw
@@ -647,6 +651,15 @@ def _raw_value_has_evidence(value: Any) -> bool:
     if isinstance(value, dict):
         return any(_raw_value_has_evidence(item) for item in value.values())
     return True
+
+
+def _is_qianlima_vip_search_endpoint_url(value: str) -> bool:
+    parsed = urlparse(str(value or "").strip())
+    return (
+        parsed.scheme in {"http", "https"}
+        and parsed.netloc == "search.vip.qianlima.com"
+        and parsed.path == "/rest/service/website/search/solr"
+    )
 
 
 def _is_fetchable_notice_url(value: str, page_url: str) -> bool:

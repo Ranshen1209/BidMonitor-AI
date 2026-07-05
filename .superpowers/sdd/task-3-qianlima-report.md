@@ -138,3 +138,44 @@
   - `48 passed, 4 warnings, 11 subtests passed in 0.24s`
 - `git diff --check`
   - clean
+
+## Remaining Review Fixes
+
+### RED Evidence
+
+- `.venv/bin/python -m pytest tests/test_source_adapter.py::TopologySourceAdapterTests::test_collect_qianlima_empty_vip_result_falls_back_without_generic_vip_search tests/test_source_adapter.py::TopologySourceAdapterTests::test_collect_qianlima_uses_vip_search_then_enriches_details -q`
+  - `FF [100%]`
+  - `test_collect_qianlima_empty_vip_result_falls_back_without_generic_vip_search`
+    - Failed with `AssertionError: 1 != 0`
+    - Showed the generic fallback still surfaced a discovered VIP search endpoint path as an adapter error instead of refusing to follow it.
+  - `test_collect_qianlima_uses_vip_search_then_enriches_details`
+    - Failed with `AssertionError: 'qianlima' unexpectedly found in {...}`
+    - Showed `_merge_qianlima_detail_notice()` was still exposing the legacy top-level `raw["qianlima"]` payload after enrichment.
+
+### GREEN Evidence
+
+- `src/crawler/source_adapter.py`
+  - `should_follow_unadmitted_candidate()` now rejects `https://search.vip.qianlima.com/rest/service/website/search/solr` before generic topology traversal can enqueue it.
+  - `_merge_qianlima_detail_notice()` now publishes a sanitized raw payload with only `raw["qianlima_search"]` and `raw["detail"]` for the merged Qianlima notice.
+- `tests/test_source_adapter.py`
+  - The empty-VIP fallback regression now injects a discovered VIP endpoint link into public HTML and asserts generic fallback never requests that URL.
+  - The enrichment regression now asserts the merged raw payload omits both top-level `qianlima` and `legacy` keys.
+
+### Test Outputs
+
+- `.venv/bin/python -m pytest tests/test_source_adapter.py::TopologySourceAdapterTests::test_collect_qianlima_empty_vip_result_falls_back_without_generic_vip_search tests/test_source_adapter.py::TopologySourceAdapterTests::test_collect_qianlima_uses_vip_search_then_enriches_details -q`
+  - `2 passed in 0.13s`
+- `.venv/bin/python -m pytest tests/test_source_adapter.py -q`
+  - `40 passed, 11 subtests passed in 0.23s`
+- `git diff --check`
+  - clean
+
+### Files Changed
+
+- `src/crawler/source_adapter.py`
+- `tests/test_source_adapter.py`
+- `.superpowers/sdd/task-3-qianlima-report.md`
+
+### Concerns
+
+- The scoped adapter suite is clean. Existing repo-level deprecation warnings in `src/database/storage.py` remain outside this task’s allowed write scope.

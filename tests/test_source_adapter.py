@@ -52,16 +52,23 @@ class TopologySourceAdapterTests(unittest.TestCase):
         )
         vip_result = CrawlResult(diagnostics=[{"status": "stopped", "reason": "empty-page"}])
         requested_http = []
+        discovered_vip_url = "https://search.vip.qianlima.com/rest/service/website/search/solr"
 
         def fake_request(url):
             if url == "https://www.qianlima.com/":
-                return "<html><body></body></html>", 200, "OK"
+                return (
+                    f'<html><body><a href="{discovered_vip_url}">search link</a></body></html>',
+                    200,
+                    "OK",
+                )
             if url in {
                 "https://www.qianlima.com/zbgg/",
                 "https://www.qianlima.com/mfzb",
                 "https://www.qianlima.com/zbyg",
             }:
                 return "<html><body></body></html>", 200, "OK"
+            if url == discovered_vip_url:
+                raise AssertionError("generic fallback must not request discovered VIP search endpoint")
             raise AssertionError(f"unexpected url {url}")
 
         def fake_request_http(method, url, params=None, data=None):
@@ -81,6 +88,7 @@ class TopologySourceAdapterTests(unittest.TestCase):
         self.assertEqual(result.notices, [])
         self.assertEqual(result.error_count, 0)
         self.assertEqual(len(requested_http), 1)
+        self.assertNotIn(discovered_vip_url, [call.args[0] for call in mock_request_url.call_args_list])
         collect_mock.assert_called_once()
 
     @patch("crawler.url_list.UrlListCrawler._request_url")
@@ -153,6 +161,7 @@ class TopologySourceAdapterTests(unittest.TestCase):
         self.assertIn("预算金额", result.notices[0].content)
         self.assertIn("qianlima_search", result.notices[0].raw)
         self.assertIn("detail", result.notices[0].raw)
+        self.assertNotIn("qianlima", result.notices[0].raw)
         self.assertNotIn("legacy", result.notices[0].raw)
         self.assertEqual(result.notices[0].raw["detail"]["title"], "上海会议系统招标公告")
         mock_request_url.assert_called_once_with(detail_url)

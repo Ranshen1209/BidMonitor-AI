@@ -409,7 +409,7 @@ git commit -m "feat: add qianlima vip mapping helpers"
 - Produces: `QianlimaVipSearchClient.collect(keywords: Iterable[str], stop_event: Any | None = None) -> CrawlResult`
 - Produces: `QianlimaVipSearchClient.fetch_membership_status() -> dict[str, Any]`
 
-- [ ] **Step 1: Write failing pagination and duplicate-stop tests**
+- [ ] **Step 1: Write failing pagination, duplicate-stop, and membership fetch tests**
 
 Append to `tests/test_qianlima_vip.py`:
 
@@ -530,11 +530,24 @@ class QianlimaVipClientTests(unittest.TestCase):
         post_pages = [call[2]["currentPage"] for call in crawler.calls if call[0] == "POST"]
         self.assertEqual(post_pages, [1, 2])
         self.assertIn("duplicate-only", result.diagnostics[-1]["reason"])
+
+    def test_fetch_membership_status_uses_safe_parser(self):
+        from crawler.qianlima_vip import QianlimaVipSearchClient
+
+        crawler = FakeQianlimaCrawler({})
+        client = QianlimaVipSearchClient(crawler, self.make_source(), {})
+
+        status = client.fetch_membership_status()
+
+        self.assertEqual(status["status"], "success")
+        self.assertEqual(status["member_level"], "VIP会员")
+        self.assertEqual(status["expire_date"], "2026-12-31")
+        self.assertTrue(any(call[0] == "GET" and call[1].endswith("/rest/u/company/getCompanyInfo") for call in crawler.calls))
 ```
 
-- [ ] **Step 2: Run pagination tests to verify they fail**
+- [ ] **Step 2: Run Task 2 red tests to verify they fail**
 
-Run: `python3 -m pytest tests/test_qianlima_vip.py::QianlimaVipClientTests::test_collect_pages_until_empty_and_maps_notices tests/test_qianlima_vip.py::QianlimaVipClientTests::test_collect_stops_after_duplicate_only_pages -q`
+Run: `python3 -m pytest tests/test_qianlima_vip.py::QianlimaVipClientTests::test_collect_pages_until_empty_and_maps_notices tests/test_qianlima_vip.py::QianlimaVipClientTests::test_collect_stops_after_duplicate_only_pages tests/test_qianlima_vip.py::QianlimaVipClientTests::test_fetch_membership_status_uses_safe_parser -q`
 
 Expected: FAIL with `ImportError` or `AttributeError` for `QianlimaVipSearchClient`.
 
@@ -664,38 +677,13 @@ Run: `python3 -m pytest tests/test_qianlima_vip.py::QianlimaVipClientTests -q`
 
 Expected: PASS.
 
-- [ ] **Step 5: Write failing membership fetch test**
-
-Append to `QianlimaVipClientTests`:
-
-```python
-    def test_fetch_membership_status_uses_safe_parser(self):
-        from crawler.qianlima_vip import QianlimaVipSearchClient
-
-        crawler = FakeQianlimaCrawler({})
-        client = QianlimaVipSearchClient(crawler, self.make_source(), {})
-
-        status = client.fetch_membership_status()
-
-        self.assertEqual(status["status"], "success")
-        self.assertEqual(status["member_level"], "VIP会员")
-        self.assertEqual(status["expire_date"], "2026-12-31")
-        self.assertTrue(any(call[0] == "GET" and call[1].endswith("/rest/u/company/getCompanyInfo") for call in crawler.calls))
-```
-
-- [ ] **Step 6: Run membership fetch test**
-
-Run: `python3 -m pytest tests/test_qianlima_vip.py::QianlimaVipClientTests::test_fetch_membership_status_uses_safe_parser -q`
-
-Expected: PASS because `fetch_membership_status()` was implemented in Step 3.
-
-- [ ] **Step 7: Run all Task 2 tests**
+- [ ] **Step 5: Run all Task 2 tests**
 
 Run: `python3 -m pytest tests/test_qianlima_vip.py -q`
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit Task 2**
+- [ ] **Step 6: Commit Task 2**
 
 ```bash
 git add src/crawler/qianlima_vip.py tests/test_qianlima_vip.py

@@ -20,7 +20,11 @@ class CrawlRunner:
     def run_source(self, source: Source, stop_event=None):
         run_id = self.storage.start_crawl_run(source.id, source.name)
         try:
-            result = self.adapter.collect(source, stop_event=stop_event)
+            result = self.adapter.collect(
+                source,
+                stop_event=stop_event,
+                notice_exists=lambda notice: self.storage.exists(notice.to_bid_info()),
+            )
         except Exception as exc:
             self.storage.finish_crawl_run(run_id, "failed", counts=self._failure_counts(error=exc))
             return []

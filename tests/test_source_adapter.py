@@ -2,7 +2,7 @@ import json
 import os
 import sys
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import requests
 
@@ -33,6 +33,78 @@ def make_source():
 
 
 class TopologySourceAdapterTests(unittest.TestCase):
+    @patch("crawler.url_list.UrlListCrawler._request_url")
+    def test_collect_qianlima_uses_vip_search_then_enriches_details(self, mock_request_url):
+        from crawler.source_models import CrawlResult
+
+        detail_url = "http://www.qianlima.com/zb/detail/20260705_8.html"
+        source = Source(
+            id="qianlima",
+            name="千里马",
+            url="https://www.qianlima.com/",
+            topology={
+                "id": "qianlima",
+                "name": "千里马",
+                "entry_url": "https://www.qianlima.com/",
+                "allowed_hosts": ["www.qianlima.com", "search.vip.qianlima.com"],
+                "detail_url_regex": [r"^https?://www\.qianlima\.com/zb/detail/\d{8}_\d+\.html$"],
+            },
+            auth_cookies=[{"domain": "qianlima.com", "cookie": "SESSION=secret", "enabled": True}],
+        )
+
+        mock_request_url.return_value = (
+            """
+            <html><body>
+                <h1>上海会议系统招标公告</h1>
+                <main>
+                    项目名称：上海会议系统公开招标项目
+                    采购人：上海采购单位
+                    预算金额：120万元
+                    发布时间：2026-07-05
+                </main>
+            </body></html>
+            """,
+            200,
+            "OK",
+        )
+
+        adapter = TopologySourceAdapter(
+            {
+                "keywords": ["会议"],
+                "qianlima_max_pages_per_keyword": 1,
+                "qianlima_max_results_per_run": 20,
+            }
+        )
+        vip_result = CrawlResult(
+            notices=[
+                Notice(
+                    source_id="qianlima",
+                    source_name="千里马",
+                    source_item_id="8",
+                    title="上海会议系统招标公告",
+                    detail_url=detail_url,
+                    publish_date="2026-07-05",
+                    content="project_stage: 招标公告",
+                    raw={"qianlima": {"contentid": 8}},
+                )
+            ],
+            fetched_count=1,
+            candidate_count=1,
+            parsed_count=1,
+            diagnostics=[{"status": "success", "parsed_count": 1}],
+        )
+
+        with patch("crawler.qianlima_vip.QianlimaVipSearchClient.collect", return_value=vip_result) as collect_mock:
+            result = adapter.collect(source)
+
+        self.assertEqual(len(result.notices), 1)
+        self.assertEqual(result.notices[0].source_item_id, "8")
+        self.assertEqual(result.notices[0].title, "上海会议系统招标公告")
+        self.assertIn("预算金额", result.notices[0].content)
+        self.assertIn("qianlima_search", result.notices[0].raw)
+        mock_request_url.assert_called_once_with(detail_url)
+        collect_mock.assert_called_once()
+
     @patch("crawler.url_list.UrlListCrawler._request_http")
     @patch("crawler.url_list.UrlListCrawler._request_url")
     def test_collect_admits_structured_json_from_post_search(self, mock_request_url, mock_request_http):
@@ -768,6 +840,36 @@ class TopologySourceAdapterTests(unittest.TestCase):
         self.assertEqual(len(result.notices), 1)
         self.assertEqual(len(requested), 3)
         self.assertEqual(result.fetched_count, len(requested))
+
+    def test_build_crawler_post_json_attaches_cookie_without_logging_body(self):
+        source = Source(
+            id="qianlima",
+            name="千里马",
+            url="https://www.qianlima.com/",
+            auth_cookies=[{"domain": "qianlima.com", "cookie": "SESSION=secret", "enabled": True}],
+        )
+        logs = []
+        adapter = TopologySourceAdapter({"request_delay": 0, "domain_delay": 0, "log_callback": logs.append})
+        crawler = adapter._build_crawler(source)
+        response = Mock(status_code=200, reason="OK", text='{"ok": true}', apparent_encoding="utf-8", encoding="utf-8")
+        crawler.session = Mock()
+        crawler.session.post.return_value = response
+
+        payload = {"keywords": "会议", "token": "should-not-log"}
+        result_payload, status_code, status_text = crawler.post_json(
+            "https://search.vip.qianlima.com/rest/service/website/search/solr",
+            payload,
+        )
+
+        self.assertEqual(result_payload, {"ok": True})
+        self.assertEqual(status_code, 200)
+        self.assertEqual(status_text, "OK")
+        crawler.session.post.assert_called_once()
+        kwargs = crawler.session.post.call_args.kwargs
+        self.assertEqual(kwargs["json"], payload)
+        self.assertEqual(kwargs["headers"]["Cookie"], "SESSION=secret")
+        self.assertTrue(any("HTTP POST JSON" in message for message in logs))
+        self.assertFalse(any("SESSION=secret" in message or "should-not-log" in message for message in logs))
 
     @patch("crawler.url_list.UrlListCrawler._request_url")
     def test_collect_preserves_missing_detail_publish_date_as_empty(self, mock_request_url):

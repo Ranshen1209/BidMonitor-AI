@@ -130,6 +130,24 @@ class UrlListCrawlerTests(unittest.TestCase):
         self.assertEqual(request["params"], {"pageNum": 1, "title": ""})
         self.assertEqual(request["data"], {})
 
+    def test_qianlima_vip_search_endpoint_is_classified_as_search(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            urls_path = os.path.join(tmpdir, "urls.txt")
+            with open(urls_path, "w", encoding="utf-8") as f:
+                f.write("https://www.qianlima.com/\n")
+
+            crawler = self.make_crawler_with_source_config(
+                urls_path,
+                None,
+                {},
+                config={"site_topologies_path": os.path.join(ROOT_DIR, "server", "site_topologies.json")},
+            )
+
+            rule = crawler._classify_url("https://search.vip.qianlima.com/rest/service/website/search/solr")
+
+        self.assertEqual(rule["topology_id"], "qianlima")
+        self.assertEqual(rule["page_type"], "search")
+
     def test_topology_search_request_rejects_templated_url(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             urls_path = os.path.join(tmpdir, "urls.txt")

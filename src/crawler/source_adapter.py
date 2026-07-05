@@ -7,6 +7,7 @@ from typing import Any
 from urllib.parse import urljoin
 
 try:
+    from .qianlima_vip import QIANLIMA_SOURCE_ID, QianlimaVipSearchClient, has_qianlima_cookie
     from .source_models import (
         CrawlResult,
         Notice,
@@ -26,6 +27,7 @@ try:
         requests as url_list_requests,
     )
 except ImportError:  # pragma: no cover
+    from crawler.qianlima_vip import QIANLIMA_SOURCE_ID, QianlimaVipSearchClient, has_qianlima_cookie
     from crawler.source_models import (
         CrawlResult,
         Notice,
@@ -53,7 +55,7 @@ class TopologySourceAdapter:
         self.config = dict(config or {})
         self.config["preserve_missing_publish_date"] = True
 
-    def collect(self, source: Source, stop_event=None) -> CrawlResult:
+    def collect(self, source: Source, stop_event=None, notice_exists=None) -> CrawlResult:
         result = CrawlResult()
         if stop_event and stop_event.is_set():
             return result
@@ -61,6 +63,18 @@ class TopologySourceAdapter:
         try:
             crawler = self._build_crawler(source)
             timestamp = datetime.now().isoformat(timespec="seconds")
+            if self._should_use_qianlima_vip_search(source):
+                keywords = self._qianlima_keywords()
+                vip_result = QianlimaVipSearchClient(
+                    crawler,
+                    source,
+                    self.config,
+                    notice_exists=notice_exists,
+                ).collect(keywords, stop_event=stop_event)
+                if vip_result.notices:
+                    return self._enrich_qianlima_vip_result(crawler, source, vip_result, timestamp, stop_event)
+                if vip_result.error_count:
+                    return vip_result
             cookie_used = crawler._get_cookie_for_url(source.url) is not None
             request_count_before = self._request_call_count(crawler)
 
@@ -405,9 +419,148 @@ class TopologySourceAdapter:
             "domain_delay": domain_delay,
         }
         crawler = UrlListCrawler(config, source_config)
+        def post_json(url: str, payload: dict[str, Any]) -> tuple[dict[str, Any], int, str]:
+            headers = crawler._get_headers()
+            headers["Content-Type"] = "application/json"
+            cookie = crawler._get_cookie_for_url(url)
+            if cookie:
+                headers["Cookie"] = cookie
+            crawler._emit_info(f"[URL请求] {crawler.name}: HTTP POST JSON {crawler._short_url(url)}")
+            response = crawler.session.post(
+                url,
+                json=payload,
+                headers=headers,
+                timeout=crawler.timeout,
+                verify=False,
+                allow_redirects=True,
+            )
+            response.encoding = response.apparent_encoding or response.encoding or "utf-8"
+            try:
+                return json.loads(response.text or "{}"), response.status_code, response.reason
+            except (TypeError, ValueError):
+                return {}, response.status_code, response.reason
+
+        def get_json(url: str) -> tuple[dict[str, Any], int, str]:
+            html, status_code, status_text = crawler._request_url(url)
+            try:
+                return json.loads(html or "{}"), status_code, status_text
+            except (TypeError, ValueError):
+                return {}, status_code, status_text
+
+        crawler.post_json = post_json
+        crawler.get_json = get_json
         if source.topology:
             crawler.site_topologies = [source.topology]
         return crawler
+
+    def _should_use_qianlima_vip_search(self, source: Source) -> bool:
+        if source.id != QIANLIMA_SOURCE_ID:
+            return False
+        if self.config.get("qianlima_vip_search_enabled", True) is False:
+            return False
+        return has_qianlima_cookie(source.auth_cookies or self.config.get("auth_cookies", []))
+
+    def _qianlima_keywords(self) -> list[str]:
+        raw_keywords = self.config.get("search_keywords") or self.config.get("keywords") or []
+        if isinstance(raw_keywords, str):
+            raw_keywords = [item.strip() for item in raw_keywords.split(",")]
+        keywords = []
+        seen = set()
+        for item in raw_keywords:
+            keyword = str(item).strip()
+            if keyword and keyword not in seen:
+                seen.add(keyword)
+                keywords.append(keyword)
+        return keywords
+
+    def _enrich_qianlima_vip_result(
+        self,
+        crawler: UrlListCrawler,
+        source: Source,
+        vip_result: CrawlResult,
+        timestamp: str,
+        stop_event=None,
+    ) -> CrawlResult:
+        result = CrawlResult(
+            fetched_count=vip_result.fetched_count,
+            candidate_count=vip_result.candidate_count,
+            skipped_count=vip_result.skipped_count,
+            error_count=vip_result.error_count,
+            errors=list(vip_result.errors),
+            diagnostics=list(vip_result.diagnostics),
+        )
+        deduplicator = NoticeDeduplicator()
+        for search_notice in vip_result.notices:
+            if stop_event and stop_event.is_set():
+                break
+            detail_notice = self._fetch_qianlima_detail_notice(crawler, source, search_notice, timestamp)
+            if detail_notice is not None:
+                result.fetched_count += 1
+                notice = self._merge_qianlima_detail_notice(search_notice, detail_notice)
+            else:
+                notice = search_notice
+            if not deduplicator.add(notice):
+                result.skipped_count += 1
+                continue
+            result.notices.append(notice)
+        result.parsed_count = len(result.notices)
+        result.diagnostics.append(
+            {
+                "url": source.url,
+                "status": "success" if result.notices else "skipped",
+                "candidate_count": result.candidate_count,
+                "parsed_count": result.parsed_count,
+                "mode": "qianlima_vip_search",
+            }
+        )
+        return result
+
+    def _fetch_qianlima_detail_notice(
+        self,
+        crawler: UrlListCrawler,
+        source: Source,
+        search_notice: Notice,
+        timestamp: str,
+    ) -> Notice | None:
+        detail_url = search_notice.detail_url
+        if not _is_admissible_notice_detail_url(detail_url):
+            return None
+        crawler._respect_rate_limit(detail_url)
+        try:
+            html, status_code, _status_text = crawler._request_url(detail_url)
+        except url_list_requests.RequestException:
+            return None
+        if status_code >= 400 or crawler._contains_blocked_sign(html, detail_url):
+            return None
+        for bid in crawler._parse_page(html, detail_url, timestamp):
+            bid_url = normalize_notice_url(getattr(bid, "url", ""))
+            if bid_url and bid_url == normalize_notice_url(detail_url):
+                detail_notice = self._notice_from_bid(source, bid)
+                detail_notice.source_item_id = search_notice.source_item_id
+                return detail_notice
+        return None
+
+    def _merge_qianlima_detail_notice(self, search_notice: Notice, detail_notice: Notice) -> Notice:
+        merged_raw = dict(search_notice.raw or {})
+        merged_raw["qianlima_search"] = dict((search_notice.raw or {}).get("qianlima", {}))
+        legacy_raw = dict((detail_notice.raw or {}).get("legacy", {}))
+        if legacy_raw:
+            merged_raw["legacy"] = legacy_raw
+        return Notice(
+            source_id=search_notice.source_id,
+            source_name=search_notice.source_name,
+            source_item_id=search_notice.source_item_id or detail_notice.source_item_id,
+            title=detail_notice.title or search_notice.title,
+            detail_url=detail_notice.detail_url or search_notice.detail_url,
+            publish_date=detail_notice.publish_date or search_notice.publish_date,
+            notice_type=detail_notice.notice_type or search_notice.notice_type,
+            purchaser=detail_notice.purchaser or search_notice.purchaser,
+            region=detail_notice.region or search_notice.region,
+            content=detail_notice.content or search_notice.content,
+            content_hash=detail_notice.content_hash or search_notice.content_hash,
+            raw=merged_raw,
+            quality_flags=list(dict.fromkeys((search_notice.quality_flags or []) + (detail_notice.quality_flags or []))),
+        )
 
     def _notice_from_bid(self, source: Source, bid) -> Notice:
         content = getattr(bid, "content", "") or ""

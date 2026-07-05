@@ -42,13 +42,29 @@ DEFAULT_SEARCH_TEMPLATE: dict[str, Any] = {
 }
 
 
+def _config_value_or_default(value: Any, default: Any) -> Any:
+    if value is None:
+        return default
+    if isinstance(value, str) and not value.strip():
+        return default
+    return value
+
+
+def _config_int_or_default(value: Any, default: int) -> int:
+    value = _config_value_or_default(value, default)
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def build_search_payload(keyword: str, page: int, config: Mapping[str, Any]) -> dict[str, Any]:
     payload = copy.deepcopy(DEFAULT_SEARCH_TEMPLATE)
     payload["keywords"] = str(keyword or "").strip()
     payload["currentPage"] = max(1, int(page))
-    payload["numPerPage"] = int(config.get("qianlima_num_per_page", payload["numPerPage"]))
-    payload["timeType"] = config.get("qianlima_time_type", payload["timeType"])
-    payload["sortType"] = config.get("qianlima_sort_type", payload["sortType"])
+    payload["numPerPage"] = _config_int_or_default(config.get("qianlima_num_per_page"), payload["numPerPage"])
+    payload["timeType"] = _config_value_or_default(config.get("qianlima_time_type"), payload["timeType"])
+    payload["sortType"] = _config_value_or_default(config.get("qianlima_sort_type"), payload["sortType"])
     return payload
 
 

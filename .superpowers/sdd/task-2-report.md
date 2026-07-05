@@ -78,3 +78,28 @@ Files changed:
 - `src/crawler/qianlima_vip.py`
 - `tests/test_qianlima_vip.py`
 - `.superpowers/sdd/task-2-report.md`
+
+## Review Fix: Safe Payload Config Fallback
+
+Fix summary:
+- Added regression coverage for empty or malformed payload config values falling back to observed defaults.
+- Changed `build_search_payload()` to use focused config fallback helpers for `numPerPage`, `timeType`, and `sortType`.
+- Preserved legitimate non-empty overrides, including the existing `qianlima_sort_type: "5"` behavior.
+
+RED/GREEN evidence for the new payload fallback test:
+- RED: `.venv/bin/python -m pytest tests/test_qianlima_vip.py::QianlimaVipTests::test_build_search_payload_falls_back_for_empty_config_values -q`
+  - Result: 1 failed.
+  - Failure: `ValueError: invalid literal for int() with base 10: ''`.
+- GREEN focused: `.venv/bin/python -m pytest tests/test_qianlima_vip.py::QianlimaVipTests::test_build_search_payload_falls_back_for_empty_config_values tests/test_qianlima_vip.py::QianlimaVipTests::test_build_search_payload_uses_observed_defaults_and_overrides -q`
+  - Result: `2 passed in 0.02s`.
+
+Test commands and outputs:
+- `.venv/bin/python -m pytest tests/test_qianlima_vip.py -q`
+  - Result: `12 passed in 0.02s`.
+- `git diff --check`
+  - Result: passed with no output.
+
+Files changed:
+- `src/crawler/qianlima_vip.py`
+- `tests/test_qianlima_vip.py`
+- `.superpowers/sdd/task-2-report.md`

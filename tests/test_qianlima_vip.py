@@ -38,6 +38,21 @@ class QianlimaVipTests(unittest.TestCase):
         self.assertEqual(payload["types"], "-1")
         self.assertEqual(payload["showContent"], 1)
 
+    def test_build_search_payload_falls_back_for_empty_config_values(self):
+        payload = build_search_payload(
+            "音视频会议",
+            1,
+            {
+                "qianlima_num_per_page": "",
+                "qianlima_time_type": "",
+                "qianlima_sort_type": None,
+            },
+        )
+
+        self.assertEqual(payload["numPerPage"], 20)
+        self.assertEqual(payload["timeType"], 8)
+        self.assertEqual(payload["sortType"], 6)
+
     def test_has_qianlima_cookie_matches_parent_domain(self):
         self.assertTrue(
             has_qianlima_cookie(

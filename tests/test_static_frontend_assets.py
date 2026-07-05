@@ -205,6 +205,15 @@ class StaticFrontendAssetsTests(unittest.TestCase):
         self.assertIn("/api/auth/login", js)
         self.assertIn("/api/auth/logout", js)
 
+    def test_qianlima_membership_status_contract_exists(self):
+        js = self.read("app.js")
+        css = self.read("styles.css")
+
+        self.assertIn("/api/sites/qianlima/membership", js)
+        self.assertIn("loadQianlimaMembership", js)
+        self.assertIn("qianlimaMembership", js)
+        self.assertIn("site-membership", css)
+
     def test_logs_panel_can_copy_visible_logs(self):
         html = self.read("index.html")
         js = self.read("app.js")

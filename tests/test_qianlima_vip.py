@@ -272,6 +272,87 @@ class QianlimaVipClientTests(unittest.TestCase):
         self.assertEqual(post_pages, [1])
         self.assertEqual(result.diagnostics[-1]["reason"], "max-results")
 
+    def test_collect_syncs_parsed_count_before_http_error_return(self):
+        from crawler.qianlima_vip import QianlimaVipSearchClient
+
+        crawler = FakeQianlimaCrawler(
+            {
+                1: {
+                    "code": 200,
+                    "data": {
+                        "data": [
+                            {
+                                "contentid": 31,
+                                "progName": "上海会议系统招标公告",
+                                "updateTime": "2026-07-05",
+                                "url": "http://www.qianlima.com/zb/detail/20260705_31.html",
+                            }
+                        ]
+                    },
+                },
+            },
+            statuses={2: 500},
+        )
+        client = QianlimaVipSearchClient(
+            crawler,
+            self.make_source(),
+            {"qianlima_max_pages_per_keyword": 5, "qianlima_max_results_per_run": 100},
+        )
+
+        result = client.collect(["会议"])
+
+        self.assertEqual([notice.source_item_id for notice in result.notices], ["31"])
+        self.assertEqual(result.parsed_count, 1)
+        self.assertEqual(result.error_count, 1)
+        self.assertEqual(result.errors, ["qianlima search HTTP 500: ERR"])
+        self.assertNotIn("SESSION=secret", json.dumps(result.errors + result.diagnostics, ensure_ascii=False))
+
+    def test_collect_does_not_treat_invalid_only_pages_as_duplicate_only(self):
+        from crawler.qianlima_vip import QianlimaVipSearchClient
+
+        crawler = FakeQianlimaCrawler(
+            {
+                1: {
+                    "code": 200,
+                    "data": {
+                        "data": [
+                            {"contentid": 41, "progName": "上海会议系统招标公告"},
+                            {"contentid": 42, "url": "http://www.qianlima.com/zb/detail/20260705_42.html"},
+                        ]
+                    },
+                },
+                2: {
+                    "code": 200,
+                    "data": {
+                        "data": [
+                            {"contentid": 43, "progName": "上海会议系统中标公告"},
+                        ]
+                    },
+                },
+                3: {"code": 200, "data": {"data": []}},
+            }
+        )
+        client = QianlimaVipSearchClient(
+            crawler,
+            self.make_source(),
+            {
+                "qianlima_max_pages_per_keyword": 5,
+                "qianlima_stop_after_duplicate_pages": 1,
+                "qianlima_max_results_per_run": 100,
+            },
+        )
+
+        result = client.collect(["会议"])
+
+        self.assertEqual(result.notices, [])
+        self.assertEqual(result.skipped_count, 3)
+        post_pages = [call[2]["currentPage"] for call in crawler.calls if call[0] == "POST"]
+        self.assertEqual(post_pages, [1, 2, 3])
+        self.assertNotIn(
+            "duplicate-only",
+            json.dumps([item.get("reason", "") for item in result.diagnostics], ensure_ascii=False),
+        )
+
     def test_fetch_membership_status_uses_safe_parser(self):
         from crawler.qianlima_vip import QianlimaVipSearchClient
 

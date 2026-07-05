@@ -50,3 +50,31 @@ Files changed:
 - `src/crawler/qianlima_vip.py`
 - `tests/test_qianlima_vip.py`
 - `.superpowers/sdd/task-2-report.md`
+
+## Re-review Fix: Early Return Counts and Invalid-Only Pages
+
+Fix summary:
+- Added regression coverage for `collect()` returning after page 2 HTTP 500 with one page 1 notice already parsed.
+- Synced `parsed_count` through all `collect()` early-return paths via `_sync_result_counts()`.
+- Changed duplicate-only stopping to require at least one mapped candidate on the page and all mapped candidates being duplicates.
+- Added regression coverage proving invalid-only pages increment `skipped_count` without emitting duplicate-only diagnostics.
+- Changed `collect()` return annotation from `Any` to `CrawlResult` and imported `CrawlResult` with the other source models.
+
+RED/GREEN evidence for new tests:
+- RED: `.venv/bin/python -m pytest tests/test_qianlima_vip.py::QianlimaVipClientTests::test_collect_syncs_parsed_count_before_http_error_return tests/test_qianlima_vip.py::QianlimaVipClientTests::test_collect_does_not_treat_invalid_only_pages_as_duplicate_only -q`
+  - Result: 2 failed.
+  - Parsed-count failure: expected `1`, got `0`.
+  - Invalid-only failure: expected `skipped_count == 3`, got `2`.
+- GREEN focused: `.venv/bin/python -m pytest tests/test_qianlima_vip.py::QianlimaVipClientTests::test_collect_syncs_parsed_count_before_http_error_return tests/test_qianlima_vip.py::QianlimaVipClientTests::test_collect_does_not_treat_invalid_only_pages_as_duplicate_only -q`
+  - Result: `2 passed in 0.02s`.
+
+Test commands and outputs:
+- `.venv/bin/python -m pytest tests/test_qianlima_vip.py -q`
+  - Result: `11 passed in 0.02s`.
+- `git diff --check`
+  - Result: passed with no output.
+
+Files changed:
+- `src/crawler/qianlima_vip.py`
+- `tests/test_qianlima_vip.py`
+- `.superpowers/sdd/task-2-report.md`

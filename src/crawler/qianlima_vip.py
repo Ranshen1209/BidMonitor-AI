@@ -5,9 +5,9 @@ import copy
 from typing import Any, Callable, Iterable, Mapping, Optional
 
 try:
-    from .source_models import Notice, Source, normalize_notice_url
+    from .source_models import CrawlResult, Notice, Source, normalize_notice_url
 except ImportError:  # pragma: no cover
-    from crawler.source_models import Notice, Source, normalize_notice_url
+    from crawler.source_models import CrawlResult, Notice, Source, normalize_notice_url
 
 
 QIANLIMA_SOURCE_ID = "qianlima"
@@ -174,6 +174,11 @@ def _safe_int(value: Any, default: int) -> int:
         return default
 
 
+def _sync_result_counts(result: CrawlResult) -> CrawlResult:
+    result.parsed_count = len(result.notices)
+    return result
+
+
 class QianlimaVipSearchClient:
     def __init__(
         self,
@@ -192,23 +197,17 @@ class QianlimaVipSearchClient:
         self.duplicate_page_limit = _safe_int(self.config.get("qianlima_stop_after_duplicate_pages"), 3)
         self.max_results = _safe_int(self.config.get("qianlima_max_results_per_run"), 1000)
 
-    def collect(self, keywords: Iterable[str], stop_event: Any | None = None) -> Any:
-        try:
-            from .source_models import CrawlResult
-        except ImportError:  # pragma: no cover
-            from crawler.source_models import CrawlResult
-
+    def collect(self, keywords: Iterable[str], stop_event: Any | None = None) -> CrawlResult:
         result = CrawlResult()
         seen_keys: set[str] = set()
         for keyword in [str(item).strip() for item in keywords if str(item).strip()]:
             duplicate_pages = 0
             for page in range(1, self.max_pages + 1):
                 if stop_event and stop_event.is_set():
-                    return result
+                    return _sync_result_counts(result)
                 if len(result.notices) >= self.max_results:
                     result.diagnostics.append({"status": "stopped", "reason": "max-results", "keyword": keyword})
-                    result.parsed_count = len(result.notices)
-                    return result
+                    return _sync_result_counts(result)
                 payload = build_search_payload(keyword, page, self.config)
                 self.crawler._respect_rate_limit(self.search_endpoint)
                 response_payload, status_code, status_text = self.crawler.post_json(self.search_endpoint, payload)
@@ -219,24 +218,26 @@ class QianlimaVipSearchClient:
                     result.diagnostics.append(
                         {"status": "failed", "reason": "qianlima_cookie_invalid_or_expired", "status_code": status_code}
                     )
-                    return result
+                    return _sync_result_counts(result)
                 if status_code == 429 or status_code >= 500:
                     result.error_count += 1
                     result.errors.append(f"qianlima search HTTP {status_code}: {status_text}")
                     result.diagnostics.append(
                         {"status": "failed", "reason": f"qianlima search HTTP {status_code}", "status_code": status_code}
                     )
-                    return result
+                    return _sync_result_counts(result)
                 records = _extract_records(response_payload)
                 if not records:
                     result.diagnostics.append({"status": "stopped", "reason": "empty-page", "keyword": keyword, "page": page})
                     break
-                page_new_count = 0
+                page_had_mapped_candidates = False
+                page_all_mapped_candidates_duplicate = True
                 for record in records:
                     notice = map_search_record_to_notice(self.source, record)
                     if notice is None:
                         result.skipped_count += 1
                         continue
+                    page_had_mapped_candidates = True
                     result.candidate_count += 1
                     key = notice.source_item_id or normalize_notice_url(notice.detail_url)
                     normalized_url = normalize_notice_url(notice.detail_url)
@@ -251,14 +252,13 @@ class QianlimaVipSearchClient:
                     if normalized_url:
                         seen_keys.add(normalized_url)
                     result.notices.append(notice)
-                    page_new_count += 1
+                    page_all_mapped_candidates_duplicate = False
                     if len(result.notices) >= self.max_results:
                         result.diagnostics.append(
                             {"status": "stopped", "reason": "max-results", "keyword": keyword, "page": page}
                         )
-                        result.parsed_count = len(result.notices)
-                        return result
-                if page_new_count == 0:
+                        return _sync_result_counts(result)
+                if page_had_mapped_candidates and page_all_mapped_candidates_duplicate:
                     duplicate_pages += 1
                     if duplicate_pages >= self.duplicate_page_limit:
                         result.diagnostics.append(
@@ -267,8 +267,7 @@ class QianlimaVipSearchClient:
                         break
                 else:
                     duplicate_pages = 0
-        result.parsed_count = len(result.notices)
-        return result
+        return _sync_result_counts(result)
 
     def fetch_membership_status(self) -> dict[str, Any]:
         self.crawler._respect_rate_limit(self.member_info_endpoint)

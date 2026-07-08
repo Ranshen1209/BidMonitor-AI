@@ -273,24 +273,24 @@
                 <div id="resultFilterBar" class="result-filter-bar">
                     <label class="filter-search">
                         <svg class="icon icon-sm" aria-hidden="true"><use href="#icon-search"></use></svg>
-                        <input type="search" class="config-input" id="resultSearchInput" placeholder="搜索项目、单位、地区、分类" onkeydown="if (event.key === 'Enter') loadResults()">
+                        <input type="search" class="config-input" id="resultSearchInput" placeholder="搜索项目、单位、地区、分类" onkeydown="if (event.key === 'Enter') applyResultFilters()">
                     </label>
-                    <select class="config-input status-select" id="resultFitStatusFilter" onchange="loadResults()">
+                    <select class="config-input status-select" id="resultFitStatusFilter" onchange="applyResultFilters()">
                         <option value="">适合性</option>
                     </select>
-                    <select class="config-input status-select" id="resultFollowDecisionFilter" onchange="loadResults()">
+                    <select class="config-input status-select" id="resultFollowDecisionFilter" onchange="applyResultFilters()">
                         <option value="">跟进决策</option>
                     </select>
-                    <select class="config-input status-select" id="resultUrgencyFilter" onchange="loadResults()">
+                    <select class="config-input status-select" id="resultUrgencyFilter" onchange="applyResultFilters()">
                         <option value="">紧急度</option>
                     </select>
-                    <select class="config-input status-select" id="resultProjectStageFilter" onchange="loadResults()">
+                    <select class="config-input status-select" id="resultProjectStageFilter" onchange="applyResultFilters()">
                         <option value="">项目阶段</option>
                     </select>
-                    <input type="text" class="config-input" id="resultSourceFilter" placeholder="来源" onkeydown="if (event.key === 'Enter') loadResults()">
-                    <input type="text" class="config-input" id="resultRegionFilter" placeholder="地区" onkeydown="if (event.key === 'Enter') loadResults()">
-                    <input type="text" class="config-input" id="resultCategoryFilter" placeholder="分类" onkeydown="if (event.key === 'Enter') loadResults()">
-                    <button class="btn btn-outline result-filter-action" onclick="loadResults()"><svg class="icon icon-sm" aria-hidden="true"><use href="#icon-refresh"></use></svg><span>刷新</span></button>
+                    <input type="text" class="config-input" id="resultSourceFilter" placeholder="来源" onkeydown="if (event.key === 'Enter') applyResultFilters()">
+                    <input type="text" class="config-input" id="resultRegionFilter" placeholder="地区" onkeydown="if (event.key === 'Enter') applyResultFilters()">
+                    <input type="text" class="config-input" id="resultCategoryFilter" placeholder="分类" onkeydown="if (event.key === 'Enter') applyResultFilters()">
+                    <button class="btn btn-outline result-filter-action" onclick="applyResultFilters()"><svg class="icon icon-sm" aria-hidden="true"><use href="#icon-refresh"></use></svg><span>刷新</span></button>
                     <button class="btn btn-primary result-filter-action" onclick="openBulkReview()"><svg class="icon icon-sm" aria-hidden="true"><use href="#icon-check"></use></svg><span>批量编辑</span></button>
                 </div>
                 <div class="results-shell">
@@ -319,6 +319,23 @@
                                 <tr><td colspan="15" class="table-empty">加载中...</td></tr>
                             </tbody>
                         </table>
+                    </div>
+                    <div class="results-pagination" id="resultsPagination">
+                        <span class="pagination-info" id="paginationInfo">共 0 条</span>
+                        <div class="pagination-controls">
+                            <label class="pagination-size">
+                                <span>每页</span>
+                                <select class="config-input" id="paginationPageSize" onchange="changePageSize(this.value)">
+                                    <option value="20">20</option>
+                                    <option value="50" selected>50</option>
+                                    <option value="100">100</option>
+                                    <option value="200">200</option>
+                                </select>
+                            </label>
+                            <button class="btn btn-sm btn-outline" id="paginationPrev" onclick="gotoResultPage(resultPage - 1)">上一页</button>
+                            <span class="pagination-page" id="paginationPageLabel">1 / 1</span>
+                            <button class="btn btn-sm btn-outline" id="paginationNext" onclick="gotoResultPage(resultPage + 1)">下一页</button>
+                        </div>
                     </div>
                 </div>
                 <div id="resultDetailModal" class="modal result-detail-modal" role="dialog" aria-modal="true" aria-labelledby="detailTitle">
@@ -364,17 +381,56 @@
 
     <div id="page-sites" class="page">
         <div class="container content-grid sites-layout">
-            <div class="card sites-search-card">
-                <div class="card-title"><span class="title-label"><svg class="icon" aria-hidden="true"><use href="#icon-search"></use></svg><span>搜索配置</span></span></div>
-                <div class="sites-search-grid">
-                    <div class="config-section config-section-wide"><label class="config-label">关注关键词（逗号分隔）</label><textarea class="config-input" id="cfgKeywords"></textarea></div>
-                    <div class="config-section"><label class="config-label">排除关键词</label><textarea class="config-input" id="cfgExclude"></textarea></div>
-                    <div class="config-section"><label class="config-label">必须包含</label><input type="text" class="config-input" id="cfgMustContain"></div>
-                    <div class="config-section"><label class="config-label">检索间隔（分钟）</label><input type="number" class="config-input" id="cfgInterval" min="5" max="120" value="20"></div>
+            <div class="card sites-search-card kw-library-card">
+                <div class="card-title kw-library-header">
+                    <span class="title-label"><svg class="icon" aria-hidden="true"><use href="#icon-search"></use></svg><span>关键词库工作台</span></span>
+                    <span class="kw-count-badge" id="kwCountBadge"></span>
                 </div>
-                <div class="toggle-switch"><span>浏览器模式</span><label class="switch"><input type="checkbox" id="cfgSelenium"><span class="slider"></span></label></div>
-                <p class="hint">浏览器模式会优先使用 CloakBrowser，必要时回落 Selenium，用于渲染 JS 列表和详情页</p>
-                <button class="btn btn-primary u-full u-full-mt-sm" onclick="saveConfig()"><svg class="icon icon-sm" aria-hidden="true"><use href="#icon-save"></use></svg><span>保存配置</span></button>
+                <div class="kw-toolbar" data-admin-only>
+                    <div class="kw-toolbar-group">
+                        <button class="btn btn-sm btn-primary" onclick="openKeywordEditor()"><svg class="icon icon-sm" aria-hidden="true"><use href="#icon-check"></use></svg><span>新增</span></button>
+                        <button class="btn btn-sm btn-outline" onclick="bulkToggleKeywords(true)"><span>批量启用</span></button>
+                        <button class="btn btn-sm btn-outline" onclick="bulkToggleKeywords(false)"><span>批量禁用</span></button>
+                        <button class="btn btn-sm btn-outline kw-danger" onclick="bulkDeleteKeywords()"><span>批量删除</span></button>
+                    </div>
+                    <div class="kw-toolbar-group">
+                        <label class="filter-search kw-search">
+                            <svg class="icon icon-sm" aria-hidden="true"><use href="#icon-search"></use></svg>
+                            <input type="search" class="config-input" id="kwSearchInput" placeholder="搜索关键词、方向、同义词" oninput="renderKeywordLibrary()">
+                        </label>
+                        <button class="btn btn-sm btn-outline" onclick="exportKeywordLibrary()"><span>导出CSV</span></button>
+                        <button class="btn btn-sm btn-outline" onclick="triggerKeywordImport()"><span>导入CSV</span></button>
+                        <input type="file" id="kwImportFile" accept=".csv" class="is-hidden" onchange="importKeywordLibrary(this)">
+                    </div>
+                </div>
+                <div class="kw-table-wrap">
+                    <table class="kw-table">
+                        <thead>
+                            <tr>
+                                <th class="kw-col-check"><input type="checkbox" id="kwSelectAll" onchange="toggleSelectAllKeywords(this.checked)"></th>
+                                <th class="kw-col-enabled">启用</th>
+                                <th>业务方向</th>
+                                <th>子分类</th>
+                                <th>关键词</th>
+                                <th>同义词</th>
+                                <th class="kw-col-scope">匹配范围</th>
+                                <th>备注</th>
+                                <th class="kw-col-actions" data-admin-only>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="kwTableBody"><tr><td colspan="9" class="table-empty">加载中...</td></tr></tbody>
+                    </table>
+                </div>
+                <div class="kw-secondary-config">
+                    <div class="sites-search-grid">
+                        <div class="config-section"><label class="config-label">排除关键词</label><textarea class="config-input" id="cfgExclude"></textarea></div>
+                        <div class="config-section"><label class="config-label">必须包含</label><input type="text" class="config-input" id="cfgMustContain"></div>
+                        <div class="config-section"><label class="config-label">检索间隔（分钟）</label><input type="number" class="config-input" id="cfgInterval" min="5" max="120" value="20"></div>
+                    </div>
+                    <div class="toggle-switch"><span>浏览器模式</span><label class="switch"><input type="checkbox" id="cfgSelenium"><span class="slider"></span></label></div>
+                    <p class="hint">关键词库中启用的条目会自动生成检索词（主词+同义词）。浏览器模式会优先使用 CloakBrowser，必要时回落 Selenium。</p>
+                    <button class="btn btn-primary u-full u-full-mt-sm" onclick="saveConfig()"><svg class="icon icon-sm" aria-hidden="true"><use href="#icon-save"></use></svg><span>保存配置</span></button>
+                </div>
             </div>
             <div class="card sites-builtins-card">
                 <div class="card-title"><span class="title-label"><svg class="icon" aria-hidden="true"><use href="#icon-globe"></use></svg><span>内置网站</span></span></div>
@@ -473,6 +529,26 @@
                 <button class="btn btn-outline modal-action" onclick="closeModal('aiModal')">取消</button>
                 <button class="btn btn-warning modal-action" onclick="testAi()"><svg class="icon icon-sm" aria-hidden="true"><use href="#icon-test"></use></svg><span>测试</span></button>
                 <button class="btn btn-primary modal-action" onclick="saveAiConfig()">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="keywordEditorModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header"><span class="title-label"><svg class="icon" aria-hidden="true"><use href="#icon-search"></use></svg><span id="kwEditorTitle">新增关键词</span></span><button class="modal-close" onclick="closeModal('keywordEditorModal')" aria-label="关闭"><svg class="icon" aria-hidden="true"><use href="#icon-x"></use></svg></button></div>
+            <div class="modal-body">
+                <input type="hidden" id="kwEditId">
+                <div class="config-section"><label class="config-label">业务方向</label><input type="text" class="config-input" id="kwEditDirection" placeholder="如：音视频会议"></div>
+                <div class="config-section"><label class="config-label">子分类</label><input type="text" class="config-input" id="kwEditSubCategory" placeholder="可选"></div>
+                <div class="config-section"><label class="config-label">关键词 *</label><input type="text" class="config-input" id="kwEditKeyword" placeholder="主关键词"></div>
+                <div class="config-section"><label class="config-label">同义词（逗号分隔）</label><textarea class="config-input" id="kwEditSynonyms" placeholder="同义词1,同义词2"></textarea></div>
+                <div class="config-section"><label class="config-label">匹配范围</label><select class="config-input" id="kwEditScope"><option value="title_content">标题+正文</option><option value="title">仅标题</option><option value="content">仅正文</option></select></div>
+                <div class="config-section"><label class="config-label">备注</label><input type="text" class="config-input" id="kwEditNote" placeholder="可选"></div>
+                <div class="toggle-switch"><span>启用</span><label class="switch"><input type="checkbox" id="kwEditEnabled" checked><span class="slider"></span></label></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline modal-action" onclick="closeModal('keywordEditorModal')">取消</button>
+                <button class="btn btn-primary modal-action" onclick="saveKeywordEntry()">保存</button>
             </div>
         </div>
     </div>

@@ -5,11 +5,13 @@ const SIDEBAR_COLLAPSED_KEY = 'bidmonitor.sidebarCollapsed';
 const LOG_FETCH_LIMIT = 2000;
 let currentConfig = {}, currentSites = [], currentUsers = [], currentUser = null;
 let currentResults = [], resultSettings = null, selectedResultIds = new Set(), activeResultId = null;
+let resultPage = 1, resultPageSize = 50, resultTotal = 0;
 let activeDetailManualOverrides = {};
 let qianlimaMembership = null;
 let editingUserId = null;
 let nextRunTime = null, countdownInterval = null;
 let statusTimer = null, logsTimer = null;
+let activePage = '', lastCrawlingState = false;
 let lastLogsSignature = '';
 const ACCESS_STATUS_OPTIONS = [
     { value: 'unknown', label: '未知' },
@@ -91,6 +93,7 @@ function toggleSidebarCollapse() {
 
 async function showPage(name, tabElement) {
     syncNavTabs();
+    activePage = name;
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
     document.getElementById('page-' + name).classList.add('active');
@@ -103,6 +106,7 @@ async function showPage(name, tabElement) {
     if (name === 'config') loadConfig();
     if (name === 'sites') {
         await loadConfig();
+        await loadKeywordLibrary();
         await loadSites();
     }
     if (name === 'users') loadUsers();
@@ -222,6 +226,17 @@ async function refreshStatus() {
         }
 
         document.getElementById('nextRun').textContent = data.next_run_time ? '下次: ' + data.next_run_time.split(' ')[1] : '';
+
+        // 抓取时实时刷新结果中心：正在抓取，或刚抓取完成（收尾刷新一次）
+        const crawling = Boolean(data.is_crawling);
+        const justFinished = lastCrawlingState && !crawling;
+        lastCrawlingState = crawling;
+        if (activePage === 'results' && (crawling || justFinished)) {
+            // 仅当停留在第一页且未打开详情时自动刷新，避免打断翻页/查看
+            if (resultPage === 1 && !activeResultId) {
+                loadResults();
+            }
+        }
     } catch (e) {
         console.error(e);
         document.getElementById('statusText').textContent = '连接失败';
@@ -325,8 +340,44 @@ function safeResultUrl(url) {
     return '#';
 }
 
+function totalResultPages() {
+    return Math.max(1, Math.ceil(resultTotal / resultPageSize));
+}
+
+function renderResultsPagination() {
+    const pages = totalResultPages();
+    if (resultPage > pages) resultPage = pages;
+    const info = document.getElementById('paginationInfo');
+    const label = document.getElementById('paginationPageLabel');
+    const prev = document.getElementById('paginationPrev');
+    const next = document.getElementById('paginationNext');
+    if (info) {
+        const start = resultTotal === 0 ? 0 : (resultPage - 1) * resultPageSize + 1;
+        const end = Math.min(resultPage * resultPageSize, resultTotal);
+        info.textContent = `共 ${resultTotal} 条，第 ${start}-${end} 条`;
+    }
+    if (label) label.textContent = `${resultPage} / ${pages}`;
+    if (prev) prev.disabled = resultPage <= 1;
+    if (next) next.disabled = resultPage >= pages;
+}
+
+function gotoResultPage(page) {
+    const pages = totalResultPages();
+    const target = Math.min(Math.max(1, page), pages);
+    if (target === resultPage) return;
+    resultPage = target;
+    loadResults();
+}
+
+function changePageSize(size) {
+    resultPageSize = parseInt(size, 10) || 50;
+    resultPage = 1;
+    loadResults();
+}
+
 function buildResultQuery() {
-    const params = new URLSearchParams({ limit: '50', offset: '0' });
+    const offset = (resultPage - 1) * resultPageSize;
+    const params = new URLSearchParams({ limit: String(resultPageSize), offset: String(offset) });
     const mapping = {
         q: 'resultSearchInput',
         fit_status: 'resultFitStatusFilter',
@@ -360,6 +411,8 @@ function renderAiStatus(item) {
 
 function renderResultsTable(data) {
     currentResults = Array.isArray(data.items) ? data.items : [];
+    if (typeof data.total === 'number') resultTotal = data.total;
+    renderResultsPagination();
     const body = document.getElementById('resultsTableBody');
     const selectAll = document.getElementById('resultsSelectAll');
     if (!currentResults.length) {
@@ -420,6 +473,11 @@ function populateResultSettingSelect(id, values, labels, allowBlank, blankLabel 
     });
     select.innerHTML = options.join('');
     if (currentValue) select.value = currentValue;
+}
+
+function applyResultFilters() {
+    resultPage = 1;
+    loadResults();
 }
 
 async function loadResults() {
@@ -720,7 +778,6 @@ async function loadConfig() {
     try {
         const res = await apiFetch('/api/config');
         currentConfig = await res.json();
-        document.getElementById('cfgKeywords').value = currentConfig.keywords || '';
         document.getElementById('cfgExclude').value = currentConfig.exclude || '';
         document.getElementById('cfgMustContain').value = currentConfig.must_contain || '';
         document.getElementById('cfgInterval').value = currentConfig.interval || 20;
@@ -731,7 +788,6 @@ async function loadConfig() {
 
 async function saveConfig() {
     try {
-        currentConfig.keywords = document.getElementById('cfgKeywords').value;
         currentConfig.exclude = document.getElementById('cfgExclude').value;
         currentConfig.must_contain = document.getElementById('cfgMustContain').value;
         currentConfig.interval = parseInt(document.getElementById('cfgInterval').value);
@@ -741,6 +797,181 @@ async function saveConfig() {
         await apiFetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(currentConfig) });
         alert('配置已保存！');
     } catch (e) { alert('保存失败: ' + e.message); }
+}
+
+// ── 关键词库工作台 ──────────────────────────────────────────────────────────
+let keywordLibrary = [];
+let selectedKeywordIds = new Set();
+const KW_SCOPE_LABELS = { title_content: '标题+正文', title: '仅标题', content: '仅正文' };
+
+async function loadKeywordLibrary() {
+    try {
+        const res = await apiFetch('/api/keyword-library');
+        keywordLibrary = await res.json();
+        selectedKeywordIds = new Set([...selectedKeywordIds].filter(id => keywordLibrary.some(k => k.id === id)));
+        renderKeywordLibrary();
+    } catch (e) {
+        console.error(e);
+        const body = document.getElementById('kwTableBody');
+        if (body) body.innerHTML = '<tr><td colspan="9" class="table-empty">加载失败，请刷新重试</td></tr>';
+    }
+}
+
+function renderKeywordLibrary() {
+    const body = document.getElementById('kwTableBody');
+    if (!body) return;
+    const query = (document.getElementById('kwSearchInput')?.value || '').trim().toLowerCase();
+    const rows = keywordLibrary.filter(k => {
+        if (!query) return true;
+        return [k.business_direction, k.sub_category, k.keyword, k.synonyms, k.note]
+            .some(v => String(v || '').toLowerCase().includes(query));
+    });
+    const badge = document.getElementById('kwCountBadge');
+    if (badge) {
+        const enabledCount = keywordLibrary.filter(k => k.enabled).length;
+        badge.textContent = `共 ${keywordLibrary.length} 条 · 启用 ${enabledCount}`;
+    }
+    if (!rows.length) {
+        body.innerHTML = '<tr><td colspan="9" class="table-empty">暂无关键词，点击“新增”添加</td></tr>';
+        return;
+    }
+    body.innerHTML = rows.map(k => `
+        <tr class="${k.enabled ? '' : 'kw-row-disabled'}">
+            <td class="kw-col-check"><input type="checkbox" ${selectedKeywordIds.has(k.id) ? 'checked' : ''} onchange="toggleKeywordSelect(${k.id}, this.checked)"></td>
+            <td class="kw-col-enabled"><label class="switch switch-sm"><input type="checkbox" ${k.enabled ? 'checked' : ''} onchange="toggleKeywordEnabled(${k.id}, this.checked)"><span class="slider"></span></label></td>
+            <td>${escapeHtml(k.business_direction)}</td>
+            <td>${escapeHtml(k.sub_category)}</td>
+            <td class="kw-keyword-cell">${escapeHtml(k.keyword)}</td>
+            <td class="kw-synonyms-cell">${escapeHtml(k.synonyms)}</td>
+            <td class="kw-col-scope">${escapeHtml(KW_SCOPE_LABELS[k.match_scope] || k.match_scope)}</td>
+            <td>${escapeHtml(k.note)}</td>
+            <td class="kw-col-actions" data-admin-only>
+                <button class="btn btn-xs btn-outline" onclick="openKeywordEditor(${k.id})">编辑</button>
+                <button class="btn btn-xs btn-outline kw-danger" onclick="deleteKeywordEntry(${k.id})">删除</button>
+            </td>
+        </tr>
+    `).join('');
+    document.querySelectorAll('[data-admin-only]').forEach(el => {
+        el.classList.toggle('is-hidden', !(currentUser && currentUser.role === 'admin'));
+    });
+}
+
+function toggleKeywordSelect(id, checked) {
+    if (checked) selectedKeywordIds.add(id); else selectedKeywordIds.delete(id);
+    const all = document.getElementById('kwSelectAll');
+    if (all) all.checked = keywordLibrary.length > 0 && selectedKeywordIds.size === keywordLibrary.length;
+}
+
+function toggleSelectAllKeywords(checked) {
+    selectedKeywordIds = checked ? new Set(keywordLibrary.map(k => k.id)) : new Set();
+    renderKeywordLibrary();
+}
+
+async function toggleKeywordEnabled(id, enabled) {
+    try {
+        await apiFetch(`/api/keyword-library/${id}`, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled }),
+        });
+        const entry = keywordLibrary.find(k => k.id === id);
+        if (entry) entry.enabled = enabled ? 1 : 0;
+        renderKeywordLibrary();
+    } catch (e) { alert('更新失败: ' + e.message); loadKeywordLibrary(); }
+}
+
+function openKeywordEditor(id) {
+    const entry = id ? keywordLibrary.find(k => k.id === id) : null;
+    document.getElementById('kwEditorTitle').textContent = entry ? '编辑关键词' : '新增关键词';
+    document.getElementById('kwEditId').value = entry ? entry.id : '';
+    document.getElementById('kwEditDirection').value = entry ? entry.business_direction : '';
+    document.getElementById('kwEditSubCategory').value = entry ? entry.sub_category : '';
+    document.getElementById('kwEditKeyword').value = entry ? entry.keyword : '';
+    document.getElementById('kwEditSynonyms').value = entry ? entry.synonyms : '';
+    document.getElementById('kwEditScope').value = entry ? entry.match_scope : 'title_content';
+    document.getElementById('kwEditNote').value = entry ? entry.note : '';
+    document.getElementById('kwEditEnabled').checked = entry ? !!entry.enabled : true;
+    document.getElementById('keywordEditorModal').classList.add('active');
+}
+
+async function saveKeywordEntry() {
+    const id = document.getElementById('kwEditId').value;
+    const payload = {
+        business_direction: document.getElementById('kwEditDirection').value.trim(),
+        sub_category: document.getElementById('kwEditSubCategory').value.trim(),
+        keyword: document.getElementById('kwEditKeyword').value.trim(),
+        synonyms: document.getElementById('kwEditSynonyms').value.trim(),
+        match_scope: document.getElementById('kwEditScope').value,
+        note: document.getElementById('kwEditNote').value.trim(),
+        enabled: document.getElementById('kwEditEnabled').checked,
+    };
+    if (!payload.keyword) { alert('关键词不能为空'); return; }
+    try {
+        const path = id ? `/api/keyword-library/${id}` : '/api/keyword-library';
+        const res = await apiFetch(path, {
+            method: id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        if (!res.ok) throw new Error((await res.json()).detail || '保存失败');
+        closeModal('keywordEditorModal');
+        await loadKeywordLibrary();
+    } catch (e) { alert('保存失败: ' + e.message); }
+}
+
+async function deleteKeywordEntry(id) {
+    if (!confirm('确定删除这条关键词？')) return;
+    try {
+        await apiFetch(`/api/keyword-library/${id}`, { method: 'DELETE' });
+        selectedKeywordIds.delete(id);
+        await loadKeywordLibrary();
+    } catch (e) { alert('删除失败: ' + e.message); }
+}
+
+async function bulkToggleKeywords(enabled) {
+    if (!selectedKeywordIds.size) { alert('请先勾选要操作的关键词'); return; }
+    try {
+        await apiFetch('/api/keyword-library/bulk-toggle', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids: [...selectedKeywordIds], enabled }),
+        });
+        await loadKeywordLibrary();
+    } catch (e) { alert('操作失败: ' + e.message); }
+}
+
+async function bulkDeleteKeywords() {
+    if (!selectedKeywordIds.size) { alert('请先勾选要删除的关键词'); return; }
+    if (!confirm(`确定删除选中的 ${selectedKeywordIds.size} 条关键词？`)) return;
+    try {
+        for (const id of [...selectedKeywordIds]) {
+            await apiFetch(`/api/keyword-library/${id}`, { method: 'DELETE' });
+        }
+        selectedKeywordIds = new Set();
+        await loadKeywordLibrary();
+    } catch (e) { alert('删除失败: ' + e.message); }
+}
+
+function exportKeywordLibrary() {
+    window.location.href = '/api/keyword-library/export.csv';
+}
+
+function triggerKeywordImport() {
+    document.getElementById('kwImportFile').click();
+}
+
+async function importKeywordLibrary(input) {
+    const file = input.files[0];
+    if (!file) return;
+    try {
+        const text = await file.text();
+        const res = await apiFetch('/api/keyword-library/import', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ csv: text }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || '导入失败');
+        alert(`导入完成：新增 ${data.added} 条，跳过 ${data.skipped} 条`);
+        await loadKeywordLibrary();
+    } catch (e) { alert('导入失败: ' + e.message); }
+    finally { input.value = ''; }
 }
 
 async function loadSites() {

@@ -338,6 +338,212 @@ QIANLIMA_CRAWLER_CONFIG_KEYS = (
     'qianlima_member_info_endpoint',
 )
 
+KEYWORD_LIBRARY_DB_FILE = os.environ.get(
+    "BIDMONITOR_KW_DB", os.path.join(BASE_DIR, "data", "keyword_library.db")
+)
+
+# 默认关键词库（首次启动自动种入）
+DEFAULT_KEYWORD_LIBRARY = [
+    # 音视频会议
+    {"business_direction":"音视频会议","sub_category":"","keyword":"音视频","synonyms":"音视频系统","match_scope":"title_content","note":""},
+    {"business_direction":"音视频会议","sub_category":"","keyword":"会议系统","synonyms":"视频会议,会议室,无纸化会议","match_scope":"title_content","note":""},
+    {"business_direction":"音视频会议","sub_category":"","keyword":"会议扩声","synonyms":"会议音响,会议摄像机,会议终端","match_scope":"title_content","note":""},
+    {"business_direction":"音视频会议","sub_category":"","keyword":"会议平板","synonyms":"会议一体机,智能会议室","match_scope":"title_content","note":""},
+    {"business_direction":"音视频会议","sub_category":"","keyword":"多功能厅","synonyms":"报告厅,阶梯教室","match_scope":"title_content","note":""},
+    {"business_direction":"音视频会议","sub_category":"","keyword":"录播教室","synonyms":"录播系统,精品录播,常态化录播","match_scope":"title_content","note":""},
+    {"business_direction":"音视频会议","sub_category":"","keyword":"扩声系统","synonyms":"音频系统,调音台,功放,音箱","match_scope":"title_content","note":""},
+    {"business_direction":"音视频会议","sub_category":"","keyword":"麦克风","synonyms":"无线话筒,鹅颈话筒","match_scope":"title_content","note":""},
+    {"business_direction":"音视频会议","sub_category":"","keyword":"中控系统","synonyms":"矩阵切换器,视频矩阵,分布式坐席,分布式系统","match_scope":"title_content","note":""},
+    {"business_direction":"音视频会议","sub_category":"","keyword":"同声传译","synonyms":"远程会议,智慧会议,会议预约,会议管理平台","match_scope":"title_content","note":""},
+    # 显示大屏与指挥中心
+    {"business_direction":"显示大屏与指挥中心","sub_category":"","keyword":"大屏","synonyms":"LED显示屏,LCD拼接屏,液晶拼接屏,DLP大屏","match_scope":"title_content","note":""},
+    {"business_direction":"显示大屏与指挥中心","sub_category":"","keyword":"显示系统","synonyms":"可视化大屏","match_scope":"title_content","note":""},
+    {"business_direction":"显示大屏与指挥中心","sub_category":"","keyword":"指挥中心","synonyms":"调度中心,应急指挥,作战指挥","match_scope":"title_content","note":""},
+    {"business_direction":"显示大屏与指挥中心","sub_category":"","keyword":"融媒体中心","synonyms":"监控中心,值班室,控制室","match_scope":"title_content","note":""},
+    {"business_direction":"显示大屏与指挥中心","sub_category":"","keyword":"可视化平台","synonyms":"信息发布屏,信息发布系统","match_scope":"title_content","note":""},
+    {"business_direction":"显示大屏与指挥中心","sub_category":"","keyword":"触控一体机","synonyms":"电子班牌,导览屏,数字标牌","match_scope":"title_content","note":""},
+    # AI视频与智能分析
+    {"business_direction":"AI视频与智能分析","sub_category":"","keyword":"AI视频","synonyms":"智能视频分析,视频智能分析,视频结构化","match_scope":"title_content","note":""},
+    {"business_direction":"AI视频与智能分析","sub_category":"","keyword":"行为分析","synonyms":"周界识别,人脸识别,车辆识别","match_scope":"title_content","note":""},
+    {"business_direction":"AI视频与智能分析","sub_category":"","keyword":"算法平台","synonyms":"视觉识别,视频算法,智能预警","match_scope":"title_content","note":""},
+    {"business_direction":"AI视频与智能分析","sub_category":"","keyword":"AI管理平台","synonyms":"智能管理平台,智慧监管平台","match_scope":"title_content","note":""},
+    {"business_direction":"AI视频与智能分析","sub_category":"","keyword":"视频联网平台","synonyms":"视频汇聚平台,视频云平台","match_scope":"title_content","note":""},
+    {"business_direction":"AI视频与智能分析","sub_category":"","keyword":"安防智能化","synonyms":"图像识别,客流分析,人员轨迹,异常行为识别","match_scope":"title_content","note":""},
+    # 基础弱电/智能化工程
+    {"business_direction":"基础弱电/智能化工程","sub_category":"","keyword":"弱电","synonyms":"弱电工程,基础弱电","match_scope":"title_content","note":""},
+    {"business_direction":"基础弱电/智能化工程","sub_category":"","keyword":"智能化","synonyms":"建筑智能化,楼宇智能化,智能化工程,智能化系统","match_scope":"title_content","note":""},
+    {"business_direction":"基础弱电/智能化工程","sub_category":"","keyword":"信息化","synonyms":"信息化建设,信息化改造","match_scope":"title_content","note":""},
+    {"business_direction":"基础弱电/智能化工程","sub_category":"","keyword":"智慧校园","synonyms":"智慧园区,智慧楼宇,智慧社区","match_scope":"title_content","note":""},
+    {"business_direction":"基础弱电/智能化工程","sub_category":"","keyword":"系统集成","synonyms":"集成服务,工程改造","match_scope":"title_content","note":""},
+    {"business_direction":"基础弱电/智能化工程","sub_category":"","keyword":"设备采购及安装","synonyms":"维保,运维,维修,改造,升级,扩容","match_scope":"title_content","note":""},
+    # 安防监控
+    {"business_direction":"安防监控","sub_category":"","keyword":"安防","synonyms":"安防系统,安全防护","match_scope":"title_content","note":""},
+    {"business_direction":"安防监控","sub_category":"","keyword":"监控","synonyms":"视频监控,监控系统,CCTV","match_scope":"title_content","note":""},
+    {"business_direction":"安防监控","sub_category":"","keyword":"摄像头","synonyms":"摄像机,高清摄像,网络摄像","match_scope":"title_content","note":""},
+    {"business_direction":"安防监控","sub_category":"","keyword":"安防工程","synonyms":"安防建设,安防改造","match_scope":"title_content","note":""},
+    # 门禁一卡通
+    {"business_direction":"门禁一卡通","sub_category":"","keyword":"门禁","synonyms":"门禁系统,门禁控制","match_scope":"title_content","note":""},
+    {"business_direction":"门禁一卡通","sub_category":"","keyword":"一卡通","synonyms":"智慧一卡通,校园一卡通","match_scope":"title_content","note":""},
+    {"business_direction":"门禁一卡通","sub_category":"","keyword":"人行通道","synonyms":"闸机,翼闸,三辊闸","match_scope":"title_content","note":""},
+    # 综合布线/网络/机房
+    {"business_direction":"综合布线/网络/机房","sub_category":"","keyword":"综合布线","synonyms":"网络布线,结构化布线","match_scope":"title_content","note":""},
+    {"business_direction":"综合布线/网络/机房","sub_category":"","keyword":"网络工程","synonyms":"局域网,无线网络,WiFi覆盖","match_scope":"title_content","note":""},
+    {"business_direction":"综合布线/网络/机房","sub_category":"","keyword":"机房","synonyms":"数据中心,IDC,机房建设","match_scope":"title_content","note":""},
+    # 可做杂项
+    {"business_direction":"可做杂项","sub_category":"","keyword":"采购意向","synonyms":"招标公告,竞争性磋商,公开招标","match_scope":"title_content","note":""},
+    {"business_direction":"可做杂项","sub_category":"","keyword":"广播","synonyms":"广播系统,IP广播,校园广播","match_scope":"title_content","note":""},
+]
+
+
+class KeywordLibraryStorage:
+    """关键词库 SQLite 存储"""
+
+    def __init__(self, db_path: str):
+        self.db_path = db_path
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        self._init_db()
+        self._seed_defaults()
+
+    def _conn(self):
+        import sqlite3
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _init_db(self):
+        with self._conn() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS keyword_library (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    business_direction TEXT NOT NULL DEFAULT '',
+                    sub_category TEXT NOT NULL DEFAULT '',
+                    keyword TEXT NOT NULL DEFAULT '',
+                    synonyms TEXT NOT NULL DEFAULT '',
+                    match_scope TEXT NOT NULL DEFAULT 'title_content',
+                    note TEXT NOT NULL DEFAULT '',
+                    created_at TEXT DEFAULT (datetime('now','localtime')),
+                    sort_order INTEGER NOT NULL DEFAULT 0
+                )
+            """)
+            conn.commit()
+
+    def _seed_defaults(self):
+        with self._conn() as conn:
+            count = conn.execute("SELECT COUNT(*) FROM keyword_library").fetchone()[0]
+            if count == 0:
+                for i, entry in enumerate(DEFAULT_KEYWORD_LIBRARY):
+                    conn.execute(
+                        "INSERT INTO keyword_library (enabled,business_direction,sub_category,keyword,synonyms,match_scope,note,sort_order) VALUES (?,?,?,?,?,?,?,?)",
+                        (1, entry["business_direction"], entry.get("sub_category",""), entry["keyword"],
+                         entry.get("synonyms",""), entry.get("match_scope","title_content"), entry.get("note",""), i)
+                    )
+                conn.commit()
+
+    def list_all(self) -> List[Dict[str, Any]]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT id,enabled,business_direction,sub_category,keyword,synonyms,match_scope,note,sort_order FROM keyword_library ORDER BY sort_order,id"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def create(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        with self._conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO keyword_library (enabled,business_direction,sub_category,keyword,synonyms,match_scope,note) VALUES (?,?,?,?,?,?,?)",
+                (int(bool(data.get("enabled", True))), data.get("business_direction",""),
+                 data.get("sub_category",""), data.get("keyword",""),
+                 data.get("synonyms",""), data.get("match_scope","title_content"), data.get("note",""))
+            )
+            conn.commit()
+            row = conn.execute("SELECT * FROM keyword_library WHERE id=?", (cur.lastrowid,)).fetchone()
+        return dict(row)
+
+    def update(self, entry_id: int, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        fields = []
+        values = []
+        for key in ("enabled","business_direction","sub_category","keyword","synonyms","match_scope","note","sort_order"):
+            if key in data:
+                fields.append(f"{key}=?")
+                values.append(int(bool(data[key])) if key == "enabled" else data[key])
+        if not fields:
+            return None
+        values.append(entry_id)
+        with self._conn() as conn:
+            conn.execute(f"UPDATE keyword_library SET {','.join(fields)} WHERE id=?", values)
+            conn.commit()
+            row = conn.execute("SELECT * FROM keyword_library WHERE id=?", (entry_id,)).fetchone()
+        return dict(row) if row else None
+
+    def delete(self, entry_id: int) -> bool:
+        with self._conn() as conn:
+            result = conn.execute("DELETE FROM keyword_library WHERE id=?", (entry_id,))
+            conn.commit()
+        return result.rowcount > 0
+
+    def bulk_toggle(self, ids: List[int], enabled: bool) -> int:
+        if not ids:
+            return 0
+        placeholders = ",".join("?" * len(ids))
+        with self._conn() as conn:
+            result = conn.execute(
+                f"UPDATE keyword_library SET enabled=? WHERE id IN ({placeholders})",
+                [int(enabled)] + ids
+            )
+            conn.commit()
+        return result.rowcount
+
+    def derive_keywords(self) -> List[str]:
+        """从启用的关键词库条目派生关键词列表（主词+同义词）"""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT keyword,synonyms FROM keyword_library WHERE enabled=1"
+            ).fetchall()
+        result = []
+        seen = set()
+        for row in rows:
+            for term in [row["keyword"]] + [s.strip() for s in row["synonyms"].split(",") if s.strip()]:
+                if term and term not in seen:
+                    seen.add(term)
+                    result.append(term)
+        return result
+
+    def export_csv(self) -> str:
+        import io, csv
+        rows = self.list_all()
+        buf = io.StringIO()
+        writer = csv.DictWriter(buf, fieldnames=["id","enabled","business_direction","sub_category","keyword","synonyms","match_scope","note"])
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({k: row.get(k,"") for k in writer.fieldnames})
+        return buf.getvalue()
+
+    def import_csv(self, csv_text: str) -> Dict[str, Any]:
+        import io, csv
+        reader = csv.DictReader(io.StringIO(csv_text.lstrip(chr(0xfeff))))
+        added = 0
+        skipped = 0
+        for row in reader:
+            kw = (row.get("keyword") or "").strip()
+            if not kw:
+                skipped += 1
+                continue
+            self.create({
+                "enabled": str(row.get("enabled","1")).strip() not in ("0","false","False",""),
+                "business_direction": row.get("business_direction",""),
+                "sub_category": row.get("sub_category",""),
+                "keyword": kw,
+                "synonyms": row.get("synonyms",""),
+                "match_scope": row.get("match_scope","title_content"),
+                "note": row.get("note",""),
+            })
+            added += 1
+        return {"added": added, "skipped": skipped}
+
+
+keyword_library_storage = KeywordLibraryStorage(KEYWORD_LIBRARY_DB_FILE)
+
+
 def is_legacy_url_list_key(key: Any) -> bool:
     return str(key).startswith('url_list_')
 
@@ -744,7 +950,12 @@ async def run_monitor_task():
     
     try:
         config = app_state.config
-        keywords = [k.strip() for k in config.get('keywords', '').split(',') if k.strip()]
+        # 优先从关键词库派生；库为空时回落 config['keywords']
+        _lib_keywords = keyword_library_storage.derive_keywords()
+        if _lib_keywords:
+            keywords = _lib_keywords
+        else:
+            keywords = [k.strip() for k in config.get('keywords', '').split(',') if k.strip()]
         exclude = [k.strip() for k in config.get('exclude', '').split(',') if k.strip()]
         must_contain = [k.strip() for k in config.get('must_contain', '').split(',') if k.strip()]
         
@@ -1500,6 +1711,73 @@ async def update_non_follow_reasons(payload: Dict[str, Any], user: Dict[str, Any
     save_config(app_state.config)
     return {"success": True}
 
+
+# ── 关键词库 API ──────────────────────────────────────────────────────────────
+
+@app.get("/api/keyword-library")
+async def get_keyword_library(user: Dict[str, Any] = Depends(get_current_user)):
+    """获取全部关键词库条目"""
+    return keyword_library_storage.list_all()
+
+
+@app.post("/api/keyword-library")
+async def create_keyword_entry(payload: Dict[str, Any] = Body(...), user: Dict[str, Any] = Depends(require_admin)):
+    """新增关键词库条目"""
+    if not (payload.get("keyword") or "").strip():
+        raise HTTPException(status_code=400, detail="keyword 不能为空")
+    return keyword_library_storage.create(payload)
+
+
+@app.put("/api/keyword-library/{entry_id}")
+async def update_keyword_entry(entry_id: int, payload: Dict[str, Any] = Body(...), user: Dict[str, Any] = Depends(require_admin)):
+    """更新关键词库条目"""
+    result = keyword_library_storage.update(entry_id, payload)
+    if result is None:
+        raise HTTPException(status_code=404, detail="条目不存在")
+    return result
+
+
+@app.delete("/api/keyword-library/{entry_id}")
+async def delete_keyword_entry(entry_id: int, user: Dict[str, Any] = Depends(require_admin)):
+    """删除关键词库条目"""
+    if not keyword_library_storage.delete(entry_id):
+        raise HTTPException(status_code=404, detail="条目不存在")
+    return {"success": True}
+
+
+@app.post("/api/keyword-library/bulk-toggle")
+async def bulk_toggle_keywords(payload: Dict[str, Any] = Body(...), user: Dict[str, Any] = Depends(require_admin)):
+    """批量启停关键词库条目"""
+    ids = payload.get("ids", [])
+    enabled = bool(payload.get("enabled", True))
+    if not isinstance(ids, list) or not ids:
+        raise HTTPException(status_code=400, detail="ids 不能为空")
+    count = keyword_library_storage.bulk_toggle([int(i) for i in ids], enabled)
+    return {"success": True, "updated": count}
+
+
+@app.get("/api/keyword-library/export.csv")
+async def export_keyword_library(user: Dict[str, Any] = Depends(get_current_user)):
+    """导出关键词库为 CSV"""
+    from fastapi.responses import Response as FastAPIResponse
+    csv_text = keyword_library_storage.export_csv()
+    return FastAPIResponse(
+        content=csv_text.encode("utf-8-sig"),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=keyword_library.csv"},
+    )
+
+
+@app.post("/api/keyword-library/import")
+async def import_keyword_library(payload: Dict[str, Any] = Body(...), user: Dict[str, Any] = Depends(require_admin)):
+    """导入关键词库（JSON body: {csv: '...'}）"""
+    csv_text = payload.get("csv", "")
+    if not csv_text.strip():
+        raise HTTPException(status_code=400, detail="csv 内容为空")
+    result = keyword_library_storage.import_csv(csv_text)
+    return {"success": True, **result}
+
+
 @app.get("/api/logs")
 async def get_logs(limit: int = 100, user: Dict[str, Any] = Depends(get_current_user)):
     """获取最近的日志"""
@@ -1723,4 +2001,6 @@ async def test_ai(user: Dict[str, Any] = Depends(get_current_user)):
 # 主入口
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8080)
+    host = os.environ.get("BIDMONITOR_HOST", "0.0.0.0")
+    port = int(os.environ.get("BIDMONITOR_PORT", "8080"))
+    uvicorn.run(app, host=host, port=port)

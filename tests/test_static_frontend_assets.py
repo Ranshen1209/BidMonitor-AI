@@ -167,7 +167,8 @@ class StaticFrontendAssetsTests(unittest.TestCase):
             "bulkProjectStage",
             "bulkNonFollowReasons",
             "sitesList",
-            "cfgKeywords",
+            "kwTableBody",
+            "keywordEditorModal",
             "cfgExclude",
             "cfgMustContain",
             "cfgInterval",
@@ -305,18 +306,18 @@ class StaticFrontendAssetsTests(unittest.TestCase):
         page_config_start = html.index('<div id="page-config" class="page">')
         page_sites_html = html[page_sites_start:page_config_start]
 
-        self.assertIn('<span>搜索配置</span>', page_sites_html)
+        self.assertIn('<span>关键词库工作台</span>', page_sites_html)
         self.assertIn('<span>内置网站</span>', page_sites_html)
         self.assertLess(
-            page_sites_html.index('<span>搜索配置</span>'),
+            page_sites_html.index('<span>关键词库工作台</span>'),
             page_sites_html.index('<span>内置网站</span>'),
         )
-        self.assertIn('id="cfgKeywords"', page_sites_html)
+        self.assertIn('id="kwTableBody"', page_sites_html)
         self.assertIn('id="cfgExclude"', page_sites_html)
         self.assertIn('id="cfgMustContain"', page_sites_html)
         self.assertIn('id="cfgInterval"', page_sites_html)
         self.assertIn('id="cfgSelenium"', page_sites_html)
-        self.assertNotIn('id="cfgKeywords"', html[page_config_start:])
+        self.assertNotIn('id="cfgKeywords"', html)
 
     def test_site_access_status_options_match_backend_contract(self):
         js = self.read("app.js")
